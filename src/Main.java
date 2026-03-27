@@ -1,6 +1,7 @@
 public class Main {
   public static void main(String[] args) {
     System.out.println("Hello World");
-    menu.afficher();
+    utilisateur teste = new utilisateur();
+    menu.afficher(teste);
   }
 }
