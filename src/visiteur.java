@@ -1,0 +1,13 @@
+import java.util.*;
+public class visiteur {
+    public static void ecouter() {
+        Scanner clavier = new Scanner(System.in);
+        boolean stop = false;
+        int max = 0;
+        do {
+            System.out.println("Quelle musique recherchez-vous ? Titre: ");
+            String titre = clavier.nextLine();
+                musique.rechercher(titre);
+        }while(stop == false && max < 5);
+    }
+}

@@ -8,7 +8,7 @@ public class menu {
         for(int i=0;i<21;i++) {
             System.out.print("-");
             try {
-                Thread.sleep(100); // pause de 1 seconde (1000 ms)
+                Thread.sleep(150); // pause de 1 seconde (1000 ms)
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -35,7 +35,7 @@ public class menu {
                 case 3:
                     teste.inscription();
                 case 4:
-                    break;
+                    visiteur.ecouter();
                 case 5:
                     System.exit(0);
             }
