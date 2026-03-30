@@ -64,55 +64,113 @@ public class utilisateur {
             e.printStackTrace();
         }
     }
-    void connexion(){
+    void connexion(int choix){
         boolean connexion = false;
-        while(connexion == false){
-            System.out.print("Veuillez entrer votre mail : ");
-            String mailsaisi = sc.nextLine();
-            String mdp = null;
-            String id = null;
-            String nom = null;
-            String prenom = null;
-            String email = null;
-            String admin = null;
-            try(BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))){
-                String ligne;
-                boolean trouver = false;
-                while((ligne = br.readLine())!= null) {
-                    String lignetrouvee = null;
-                    String[] parts = ligne.split(";");
-                    id = parts[0];
-                    nom = parts[1];
-                    prenom = parts[2];
-                    mdp = parts[3];
-                    email = parts[4];
-                    admin = parts[5];
-                    if (mailsaisi.equals(email)) {
-                        trouver = true;
-                        break;
+        if (choix==2){
+            while(connexion == false){
+                System.out.print("Veuillez entrer votre mail : ");
+                String mailsaisi = sc.nextLine();
+                String mdp = null;
+                String id = null;
+                String nom = null;
+                String prenom = null;
+                String email = null;
+                String admin = null;
+                try(BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))){
+                    String ligne;
+                    boolean trouver = false;
+                    while((ligne = br.readLine())!= null) {
+                        String lignetrouvee = null;
+                        String[] parts = ligne.split(";");
+                        id = parts[0];
+                        nom = parts[1];
+                        prenom = parts[2];
+                        mdp = parts[3];
+                        email = parts[4];
+                        if (mailsaisi.equals(email)) {
+                            trouver = true;
+                            break;
+                        }
+
                     }
-                }
-
-                if (trouver){
-                    System.out.println("Veuillez entrer votre mot de passe :");
-                    String mdpsaisi =  sc.nextLine();
-
-                    while(!mdpsaisi.equals(mdp)){
-                        System.out.println("Mot de passe incorrecte!");
+                    if (trouver){
                         System.out.println("Veuillez entrer votre mot de passe :");
-                        mdpsaisi =  sc.nextLine();
+                        String mdpsaisi =  sc.nextLine();
+
+                        while(!mdpsaisi.equals(mdp)){
+                            System.out.println("Mot de passe incorrecte!");
+                            System.out.println("Veuillez entrer votre mot de passe :");
+                            mdpsaisi =  sc.nextLine();
+                        }
+                        System.out.println("Connexion réussie !");
+                        connexion = true;
                     }
-                    System.out.println("Connexion réussie !");
-                    connexion = true;
-                }
-                else
-                {
-                    System.out.println("Mail incorecte !");
-                }
+                    else
+                    {
+                        System.out.println("Mail incorecte !");
+                    }
 
 
-            }catch (IOException e){
-                e.printStackTrace();
+                }catch (IOException e){
+                    e.printStackTrace();
+                }
+            }
+        }
+        if(choix==1){
+            while(connexion == false){
+                System.out.println("Veuillez êtes en connexion admin");
+                System.out.print("Veuillez entrer votre mail : ");
+                String mailsaisi = sc.nextLine();
+                String mdp = null;
+                String id = null;
+                String nom = null;
+                String prenom = null;
+                String email = null;
+                String admin = null;
+                try(BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))){
+                    String ligne;
+                    boolean trouver = false;
+                    boolean pasadmin = false;
+                    while((ligne = br.readLine())!= null) {
+                        String lignetrouvee = null;
+                        String[] parts = ligne.split(";");
+                        id = parts[0];
+                        nom = parts[1];
+                        prenom = parts[2];
+                        mdp = parts[3];
+                        email = parts[4];
+                        admin = parts[5];
+                        if (mailsaisi.equals(email) && admin.equals("0")) {
+                            trouver = true;
+                            break;
+                        }else if(mailsaisi.equals(email) && !admin.equals("0")){
+                            pasadmin = true;
+                            break;
+                        }
+
+                    }
+
+                    if (trouver) {
+                        System.out.println("Veuillez entrer votre mot de passe :");
+                        String mdpsaisi = sc.nextLine();
+
+                        while (!mdpsaisi.equals(mdp)) {
+                            System.out.println("Mot de passe incorrecte!");
+                            System.out.println("Veuillez entrer votre mot de passe :");
+                            mdpsaisi = sc.nextLine();
+                        }
+                        System.out.println("Connexion réussie !");
+                        connexion = true;
+                    }else if (pasadmin) {
+                        System.out.println("Vous n'êtes pas admin");
+                    }else{
+                        System.out.println("Mail incorecte !");
+                    }
+
+
+                }catch (IOException e){
+                    e.printStackTrace();
+                }
             }
         }
     }

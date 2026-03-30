@@ -52,7 +52,7 @@ public class administrateur extends utilisateur{
 
         //écrire dans le fichier
         try (FileWriter fw = new FileWriter(fichier, true)) {
-            fw.write(nouvelID + ";" + titre + ";" + artiste + ";" + annee + "\n");
+            fw.write("\n" + nouvelID + ";" + titre + ";" + artiste + ";" + annee);
             System.out.println("Musique ajoutée ! (ID : " + nouvelID + ")");
         } catch (IOException e) {
             e.printStackTrace();

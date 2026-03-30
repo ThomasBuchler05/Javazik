@@ -4,11 +4,12 @@ public class menu {
 
     public static void afficher(utilisateur teste) {
         System.out.println("BIENVENUE SUR JAVAZIK");
+        System.out.println("Chargement de l'application !");
         Scanner clavier = new Scanner(System.in);
-        for(int i=0;i<21;i++) {
+        for(int i=0;i<50;i++) {
             System.out.print("-");
             try {
-                Thread.sleep(150); // pause de 1 seconde (1000 ms)
+                Thread.sleep((30)); // pause de 1 seconde (1000 ms)
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -29,7 +30,7 @@ public class menu {
             while(choix < 1 || choix > 5);
             switch(choix){
                 case 1:
-                    teste.connexion();
+                    teste.connexion(choix);
 
                     int choixAdmin;
                     do {
@@ -58,7 +59,8 @@ public class menu {
                     break;
 
                 case 2:
-                    teste.connexion();
+
+                    teste.connexion(choix);
                     int choixClient;
                     do {
                         System.out.println("\n  MENU Client ");
