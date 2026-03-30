@@ -7,8 +7,13 @@ public class visiteur {
         do {
             System.out.println("Quelle musique recherchez-vous ? Titre: ");
             String titre = clavier.nextLine();
-                musique.rechercher(titre);
-                max++;
+            if (titre == "stop"){
+                stop = true;
+            }
+            else{
+            musique.rechercher(titre);
+            max++;};
+
         }while(stop == false && max < 5);
     }
 }
