@@ -90,8 +90,10 @@ public class menu {
                     break;
                 case 3:
                     teste.inscription();
+                    break;
                 case 4:
                     visiteur.ecouter();
+                    break;
                 case 5:
                     System.exit(0);
             }

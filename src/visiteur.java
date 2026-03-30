@@ -1,5 +1,6 @@
 import java.util.*;
 public class visiteur {
+
     public static void ecouter() {
         Scanner clavier = new Scanner(System.in);
         boolean stop = false;
