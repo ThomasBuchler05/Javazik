@@ -30,10 +30,32 @@ public class menu {
             switch(choix){
                 case 1:
                     //utilisateur.connexion();
-                    int i;
-                    System.out.println("Entrez votre choix: ");
+                    int choixAdmin;
+                    do {
+                        System.out.println("\n  MENU ADMINISTRATEUR ");
+                        System.out.println("1. Ajouter une musique");
+                        System.out.println("2. Supprimer une musique");
+                        System.out.println("3. Quitter le menu admin");
+                        System.out.print("Votre choix : ");
+                        choixAdmin = clavier.nextInt();
+                        clavier.nextLine(); // vider le buffer
 
+                        switch(choixAdmin){
+                            case 1:
+                                administrateur.ajouter_musique();
+                                break;
+                            case 2:
+                                administrateur.supprimer_musique();
+                                break;
+                            case 3:
+                                System.out.println("Retour au menu principal");
+                                break;
+                            default:
+                                System.out.println("Choix invalide !");
+                        }
+                    } while(choixAdmin != 3);
                     break;
+
                 case 2:
                     break;
                 case 3:

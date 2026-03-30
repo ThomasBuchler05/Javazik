@@ -4,10 +4,10 @@ import java.io.*;
 public class administrateur extends utilisateur{
     private int ID;
     private String NOM, PRENOM, MDP, EMAIL;
-    public String titre;
-    public int annee;
-    public String artiste;
-    public int idCible;
+    static String titre;
+    static public int annee;
+    static String artiste;
+    static public int idCible;
 
     public administrateur(int ID, String NOM, String PRENOM, String MDP, String EMAIL, String prenom, String titre, int annee,  String artiste,  int idCible) {
         this.ID = ID;
@@ -21,7 +21,7 @@ public class administrateur extends utilisateur{
         this.idCible = idCible;
     }
 
-    void ajouter_musique(){
+    static void ajouter_musique(){
         String fichier = "musiques.txt";
         Scanner sc = new Scanner(System.in);
         System.out.println("Veuillez saisir le Titre de la musique");
@@ -58,7 +58,7 @@ public class administrateur extends utilisateur{
             e.printStackTrace();
         }
     }
-    void supprimer_musique(){
+    static void supprimer_musique(){
         String fichier = "musiques.txt";
         Scanner sc = new Scanner(System.in);
         System.out.println("Veuillez saisir l'ID de la musique à supprimer");
