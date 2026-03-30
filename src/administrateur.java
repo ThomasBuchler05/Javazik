@@ -4,13 +4,12 @@ import java.io.*;
 public class administrateur extends utilisateur{
     private int ID;
     private String NOM, PRENOM, MDP, EMAIL;
-    private String prenom;
     public String titre;
     public int annee;
     public String artiste;
     public int idCible;
 
-    public administrateur(int ID, String NOM, String PRENOM, String MDP, String EMAIL){
+    public administrateur(int ID, String NOM, String PRENOM, String MDP, String EMAIL, String prenom, String titre, int annee,  String artiste,  int idCible) {
         this.ID = ID;
         this.NOM = NOM;
         this.PRENOM = PRENOM;
@@ -22,7 +21,7 @@ public class administrateur extends utilisateur{
         this.idCible = idCible;
     }
 
-    void ajouter_musique(String NouvMusique){
+    void ajouter_musique(){
         String fichier = "musiques.txt";
         Scanner sc = new Scanner(System.in);
         System.out.println("Veuillez saisir le Titre de la musique");

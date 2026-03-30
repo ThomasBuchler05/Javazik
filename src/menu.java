@@ -29,6 +29,10 @@ public class menu {
             while(choix < 1 || choix > 5);
             switch(choix){
                 case 1:
+                    //utilisateur.connexion();
+                    int i;
+                    System.out.println("Entrez votre choix: ");
+
                     break;
                 case 2:
                     break;
