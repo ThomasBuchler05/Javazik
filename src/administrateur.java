@@ -92,7 +92,7 @@ public class administrateur extends utilisateur{
         }
         try (FileWriter fw = new FileWriter(fichier, false)) { // false = écrasement
             for (String ligne : lignesAGarder) {
-                fw.write(ligne + "\n");
+                fw.write( "\n" + ligne );
             }
             System.out.println("Musique supprimée !");
         } catch (IOException e) {

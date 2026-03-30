@@ -74,6 +74,7 @@ public class utilisateur {
             String nom = null;
             String prenom = null;
             String email = null;
+            String admin = null;
             try(BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))){
                 String ligne;
                 boolean trouver = false;
@@ -85,14 +86,17 @@ public class utilisateur {
                     prenom = parts[2];
                     mdp = parts[3];
                     email = parts[4];
+                    admin = parts[5];
                     if (mailsaisi.equals(email)) {
                         trouver = true;
                         break;
                     }
                 }
-                if(trouver){
+
+                if (trouver){
                     System.out.println("Veuillez entrer votre mot de passe :");
                     String mdpsaisi =  sc.nextLine();
+
                     while(!mdpsaisi.equals(mdp)){
                         System.out.println("Mot de passe incorrecte!");
                         System.out.println("Veuillez entrer votre mot de passe :");
@@ -105,6 +109,8 @@ public class utilisateur {
                 {
                     System.out.println("Mail incorecte !");
                 }
+
+
             }catch (IOException e){
                 e.printStackTrace();
             }

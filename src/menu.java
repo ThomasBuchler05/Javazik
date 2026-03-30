@@ -30,6 +30,7 @@ public class menu {
             switch(choix){
                 case 1:
                     teste.connexion();
+
                     int choixAdmin;
                     do {
                         System.out.println("\n  MENU ADMINISTRATEUR ");
