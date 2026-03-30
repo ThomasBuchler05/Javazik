@@ -57,6 +57,36 @@ public class menu {
                     break;
 
                 case 2:
+                    //utilisateur.connexion();
+                    int choixClient;
+                    do {
+                        System.out.println("\n  MENU Client ");
+                        System.out.println("1. Créer et gérer une playlist");
+                        System.out.println("2. Ecouter une musique");
+                        System.out.println("3. Consulter l'historique d'écoute");
+                        System.out.println("4. Revenir au menu principal");
+
+                        System.out.print("Votre choix : ");
+                        choixClient = clavier.nextInt();
+                        clavier.nextLine();
+
+                        switch(choixClient){
+                            case 1:
+
+                                break;
+                            case 2:
+                                visiteur.ecouter();
+                                break;
+                            case 3:
+
+                                break;
+                            case 4:
+                                System.out.println("Retour au menu principal");
+                                break;
+                            default:
+                                System.out.println("Choix invalide !");
+                        }
+                    } while(choixClient != 4);
                     break;
                 case 3:
                     teste.inscription();
