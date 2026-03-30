@@ -29,7 +29,7 @@ public class menu {
             while(choix < 1 || choix > 5);
             switch(choix){
                 case 1:
-                    //utilisateur.connexion();
+                    teste.connexion();
                     int choixAdmin;
                     do {
                         System.out.println("\n  MENU ADMINISTRATEUR ");
@@ -57,7 +57,7 @@ public class menu {
                     break;
 
                 case 2:
-                    //utilisateur.connexion();
+                    teste.connexion();
                     int choixClient;
                     do {
                         System.out.println("\n  MENU Client ");
