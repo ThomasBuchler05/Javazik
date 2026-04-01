@@ -1,7 +1,8 @@
+import controller.ControleurPrincipal;
+
 public class Main {
-  public static void main(String[] args) {
-    client teste = new client();
-    while(true){
-      menu.afficher(teste);}
+    public static void main(String[] args) {
+        ControleurPrincipal controleur = new ControleurPrincipal();
+        controleur.lancer();
     }
 }
