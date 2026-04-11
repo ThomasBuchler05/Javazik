@@ -181,14 +181,17 @@ public class ControleurPrincipal {
                     retirerMusiquePlaylist();
                     break;
                 case 5:
-                    supprimerPlaylist();
+                    ecouterPlaylist();
                     break;
                 case 6:
+                    supprimerPlaylist();
+                    break;
+                case 7:
                     break;
                 default:
                     vue.afficherChoixInvalide();
             }
-        } while (choix != 6);
+        } while (choix != 7);
     }
 
     private void creerPlaylist() {
@@ -254,6 +257,32 @@ public class ControleurPrincipal {
         } else {
             vue.afficherErreurId();
         }
+    }
+
+    private void ecouterPlaylist() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        if (playlists.isEmpty()) return;
+
+        int idPlaylist = vue.demanderIdPlaylist();
+        Playlist cible = trouverPlaylist(playlists, idPlaylist);
+        if (cible == null) {
+            vue.afficherPlaylistIntrouvable();
+            return;
+        }
+
+        List<Musique> musiques = cible.getMusiques();
+        if (musiques.isEmpty()) {
+            vue.afficherPlaylistVide();
+            return;
+        }
+
+        vue.afficherLecturePlaylist(cible.getNom());
+        for (Musique m : musiques) {
+            vue.afficherMusique(m);
+            vue.afficherEcoute();
+        }
+        vue.afficherFinPlaylist(cible.getNom());
     }
 
     private void supprimerPlaylist() {

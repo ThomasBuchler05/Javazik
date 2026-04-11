@@ -206,8 +206,9 @@ public class VueConsole {
         System.out.println("2. Voir mes playlists");
         System.out.println("3. Ajouter une musique a une playlist");
         System.out.println("4. Retirer une musique d'une playlist");
-        System.out.println("5. Supprimer une playlist");
-        System.out.println("6. Retour au menu client");
+        System.out.println("5. Ecouter une playlist");
+        System.out.println("6. Supprimer une playlist");
+        System.out.println("7. Retour au menu client");
         System.out.print("Votre choix : ");
         int choix = clavier.nextInt();
         clavier.nextLine();
@@ -278,6 +279,18 @@ public class VueConsole {
 
     public void afficherPlaylistIntrouvable() {
         System.out.println("Playlist introuvable ou vous n'en etes pas le proprietaire.");
+    }
+
+    public void afficherLecturePlaylist(String nom) {
+        System.out.println("\n>>> Lecture de la playlist : " + nom + " <<<");
+    }
+
+    public void afficherFinPlaylist(String nom) {
+        System.out.println(">>> Fin de la playlist : " + nom + " <<<");
+    }
+
+    public void afficherPlaylistVide() {
+        System.out.println("Cette playlist est vide, ajoutez des musiques d'abord !");
     }
 
     public void afficherErreurId() {
