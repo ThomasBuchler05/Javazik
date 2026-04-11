@@ -2,8 +2,11 @@ package controller;
 
 import model.Client;
 import model.Musique;
+import model.Playlist;
 import model.Utilisateur;
 import view.VueConsole;
+
+import java.util.List;
 
 public class ControleurPrincipal {
 
@@ -141,10 +144,10 @@ public class ControleurPrincipal {
 
             switch (choixClient) {
                 case 1:
-                    // créer et gérer une playlist (pas encore implémenté)
+                    menuPlaylist();
                     break;
                 case 2:
-                    ecouter(5); // limite de 5 pour visiteur, illimité pour client si vous changez
+                    ecouter(Integer.MAX_VALUE);
                     break;
                 case 3:
                     // consulter historique (pas encore implémenté)
@@ -156,6 +159,127 @@ public class ControleurPrincipal {
                     vue.afficherChoixInvalide();
             }
         } while (choixClient != 4);
+    }
+
+    // ==================== MENU PLAYLIST ====================
+
+    private void menuPlaylist() {
+        int choix;
+        do {
+            choix = vue.afficherMenuPlaylist();
+            switch (choix) {
+                case 1:
+                    creerPlaylist();
+                    break;
+                case 2:
+                    voirPlaylists();
+                    break;
+                case 3:
+                    ajouterMusiquePlaylist();
+                    break;
+                case 4:
+                    retirerMusiquePlaylist();
+                    break;
+                case 5:
+                    supprimerPlaylist();
+                    break;
+                case 6:
+                    break;
+                default:
+                    vue.afficherChoixInvalide();
+            }
+        } while (choix != 6);
+    }
+
+    private void creerPlaylist() {
+        String nom = vue.demanderNomPlaylist();
+        Playlist p = Playlist.creer(nom, utilisateur.getID());
+        vue.afficherPlaylistCreee(p.getId(), p.getNom());
+    }
+
+    private void voirPlaylists() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        for (Playlist p : playlists) {
+            vue.afficherContenuPlaylist(p);
+        }
+    }
+
+    private void ajouterMusiquePlaylist() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        if (playlists.isEmpty()) return;
+
+        int idPlaylist = vue.demanderIdPlaylist();
+        Playlist cible = trouverPlaylist(playlists, idPlaylist);
+        if (cible == null) {
+            vue.afficherPlaylistIntrouvable();
+            return;
+        }
+
+        // Rechercher la musique par titre/artiste pour afficher l'ID
+        String recherche = vue.demanderRecherche();
+        Musique m = Musique.rechercher(recherche);
+        if (m == null) {
+            vue.afficherAucuneMusiqueTrouvee();
+            return;
+        }
+        vue.afficherMusique(m);
+
+        boolean ok = Playlist.ajouterMusique(idPlaylist, m.getId());
+        if (ok) {
+            vue.afficherMusiqueAjouteePlaylist(m.getTitre(), cible.getNom());
+        } else {
+            vue.afficherMusiqueDejaPresente();
+        }
+    }
+
+    private void retirerMusiquePlaylist() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        if (playlists.isEmpty()) return;
+
+        int idPlaylist = vue.demanderIdPlaylist();
+        Playlist cible = trouverPlaylist(playlists, idPlaylist);
+        if (cible == null) {
+            vue.afficherPlaylistIntrouvable();
+            return;
+        }
+        vue.afficherContenuPlaylist(cible);
+
+        int idMusique = vue.demanderIdMusique();
+        boolean ok = Playlist.retirerMusique(idPlaylist, idMusique);
+        if (ok) {
+            vue.afficherMusiqueRetirée();
+        } else {
+            vue.afficherErreurId();
+        }
+    }
+
+    private void supprimerPlaylist() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        if (playlists.isEmpty()) return;
+
+        int idPlaylist = vue.demanderIdPlaylist();
+        Playlist cible = trouverPlaylist(playlists, idPlaylist);
+        if (cible == null) {
+            vue.afficherPlaylistIntrouvable();
+            return;
+        }
+        boolean ok = Playlist.supprimer(idPlaylist, utilisateur.getID());
+        if (ok) {
+            vue.afficherPlaylistSupprimee(cible.getNom());
+        } else {
+            vue.afficherPlaylistIntrouvable();
+        }
+    }
+
+    private Playlist trouverPlaylist(List<Playlist> playlists, int id) {
+        for (Playlist p : playlists) {
+            if (p.getId() == id) return p;
+        }
+        return null;
     }
 
     // ==================== VISITEUR ====================

@@ -27,6 +27,27 @@ public class Musique {
     public void setAnnee(int annee) { this.annee = annee; }
 
     /**
+     * Recherche une musique par son ID dans le fichier musiques.txt
+     */
+    public static Musique rechercherParId(int idCible) {
+        String fichier = "musiques.txt";
+        try (BufferedReader reader = new BufferedReader(new FileReader(fichier))) {
+            String ligne;
+            while ((ligne = reader.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parties = ligne.split(";");
+                int id = Integer.parseInt(parties[0]);
+                if (id == idCible) {
+                    return new Musique(id, parties[1], parties[2], Integer.parseInt(parties[3]));
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    /**
      * Recherche une musique par titre ou artiste dans le fichier musiques.txt
      * Retourne la Musique trouvée ou null si rien trouvé
      */

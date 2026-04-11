@@ -198,6 +198,92 @@ public class VueConsole {
         System.out.println("\nIl vous reste " + restantes + " musiques que vous pouvez écouter, pour plus d'essais prenez un abonnements à 1900 euros par semaines.");
     }
 
+    // ==================== PLAYLISTS ====================
+
+    public int afficherMenuPlaylist() {
+        System.out.println("\n  GESTION DES PLAYLISTS ");
+        System.out.println("1. Creer une nouvelle playlist");
+        System.out.println("2. Voir mes playlists");
+        System.out.println("3. Ajouter une musique a une playlist");
+        System.out.println("4. Retirer une musique d'une playlist");
+        System.out.println("5. Supprimer une playlist");
+        System.out.println("6. Retour au menu client");
+        System.out.print("Votre choix : ");
+        int choix = clavier.nextInt();
+        clavier.nextLine();
+        return choix;
+    }
+
+    public String demanderNomPlaylist() {
+        System.out.print("Nom de la playlist : ");
+        return clavier.nextLine();
+    }
+
+    public int demanderIdPlaylist() {
+        System.out.print("ID de la playlist : ");
+        int id = clavier.nextInt();
+        clavier.nextLine();
+        return id;
+    }
+
+    public int demanderIdMusique() {
+        System.out.print("ID de la musique : ");
+        int id = clavier.nextInt();
+        clavier.nextLine();
+        return id;
+    }
+
+    public void afficherPlaylistCreee(int id, String nom) {
+        System.out.println("Playlist \"" + nom + "\" creee avec succes (ID : " + id + ") !");
+    }
+
+    public void afficherListePlaylists(java.util.List<model.Playlist> playlists) {
+        if (playlists.isEmpty()) {
+            System.out.println("Vous n'avez aucune playlist pour le moment.");
+            return;
+        }
+        System.out.println("\n--- Vos playlists ---");
+        for (model.Playlist p : playlists) {
+            System.out.println(p);
+        }
+    }
+
+    public void afficherContenuPlaylist(model.Playlist playlist) {
+        System.out.println("\n--- Playlist : " + playlist.getNom() + " ---");
+        java.util.List<model.Musique> musiques = playlist.getMusiques();
+        if (musiques.isEmpty()) {
+            System.out.println("  (aucune musique dans cette playlist)");
+        } else {
+            for (model.Musique m : musiques) {
+                System.out.println("  [" + m.getId() + "] " + m.getTitre() + " - " + m.getArtiste() + " (" + m.getAnnee() + ")");
+            }
+        }
+    }
+
+    public void afficherMusiqueAjouteePlaylist(String titre, String nomPlaylist) {
+        System.out.println("\"" + titre + "\" ajoutee a la playlist \"" + nomPlaylist + "\" !");
+    }
+
+    public void afficherMusiqueDejaPresente() {
+        System.out.println("Cette musique est deja dans la playlist.");
+    }
+
+    public void afficherMusiqueRetirée() {
+        System.out.println("Musique retiree de la playlist.");
+    }
+
+    public void afficherPlaylistSupprimee(String nom) {
+        System.out.println("Playlist \"" + nom + "\" supprimee.");
+    }
+
+    public void afficherPlaylistIntrouvable() {
+        System.out.println("Playlist introuvable ou vous n'en etes pas le proprietaire.");
+    }
+
+    public void afficherErreurId() {
+        System.out.println("ID invalide ou introuvable.");
+    }
+
     // ==================== DIVERS ====================
 
     public void afficherChoixInvalide() {
