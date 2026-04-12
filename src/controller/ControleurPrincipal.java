@@ -1,6 +1,7 @@
 package controller;
 
 import model.Client;
+import model.Historique;
 import model.Musique;
 import model.Playlist;
 import model.Utilisateur;
@@ -150,7 +151,7 @@ public class ControleurPrincipal {
                     ecouter(Integer.MAX_VALUE);
                     break;
                 case 3:
-                    // consulter historique (pas encore implémenté)
+                    consulterHistorique();
                     break;
                 case 4:
                     vue.afficherRetourMenuPrincipal();
@@ -221,7 +222,7 @@ public class ControleurPrincipal {
         }
 
         // Rechercher la musique par titre/artiste pour afficher l'ID
-        String recherche = vue.demanderRecherche();
+        String recherche = vue.demanderRechercheMusique();
         Musique m = Musique.rechercher(recherche);
         if (m == null) {
             vue.afficherAucuneMusiqueTrouvee();
@@ -278,10 +279,33 @@ public class ControleurPrincipal {
         }
 
         vue.afficherLecturePlaylist(cible.getNom());
-        for (Musique m : musiques) {
-            vue.afficherMusique(m);
+
+        int index = 0;
+        while (index < musiques.size()) {
+            Musique m = musiques.get(index);
+            vue.afficherPochette(index + 1, musiques.size(), m);
             vue.afficherEcoute();
+
+            // Enregistrement dans l'historique
+            Historique.enregistrerEcoute(utilisateur.getID(), m);
+
+            // Contrôles après chaque morceau
+            int action = vue.afficherControlesLecteur(index > 0, index < musiques.size() - 1);
+            switch (action) {
+                case 1: // morceau précédent
+                    index--;
+                    break;
+                case 2: // morceau suivant
+                    index++;
+                    break;
+                case 3: // arrêter la playlist
+                    vue.afficherFinPlaylist(cible.getNom());
+                    return;
+                default:
+                    index++;
+            }
         }
+
         vue.afficherFinPlaylist(cible.getNom());
     }
 
@@ -320,23 +344,58 @@ public class ControleurPrincipal {
     // ==================== ECOUTE ====================
 
     private void ecouter(int maxEcoutes) {
+        boolean estAbonne = (maxEcoutes == Integer.MAX_VALUE);
         int compteur = 0;
-        boolean stop = false;
-        while (!stop && compteur < maxEcoutes) {
-            String recherche = vue.demanderRecherche();
-            if (recherche.equalsIgnoreCase("stop")) {
-                stop = true;
+        boolean quitter = false;
+
+        while (!quitter && compteur < maxEcoutes) {
+            String recherche = vue.demanderRechercheMusique();
+            if (recherche.equalsIgnoreCase("stop") || recherche.equalsIgnoreCase("quitter")) {
+                quitter = true;
                 break;
             }
+
             Musique m = Musique.rechercher(recherche);
-            if (m != null) {
-                vue.afficherMusique(m);
-                vue.afficherEcoute();
-                compteur++;
-            } else {
+            if (m == null) {
                 vue.afficherAucuneMusiqueTrouvee();
+                // on retourne au sous-menu sans décompter
+                int suite = vue.afficherMenuApresEchecRecherche();
+                if (suite == 2) quitter = true;
+                continue;
             }
-            vue.afficherEcoutesRestantes(maxEcoutes - compteur);
+
+            // Lecture du morceau
+            vue.afficherMusique(m);
+            vue.afficherEcoute();
+            compteur++;
+
+            // Enregistrement historique (abonné uniquement)
+            if (estAbonne) {
+                Historique.enregistrerEcoute(utilisateur.getID(), m);
+            }
+
+            // Sous-menu après écoute
+            int choixSuite = vue.afficherMenuApresEcoute(estAbonne ? -1 : maxEcoutes - compteur);
+            switch (choixSuite) {
+                case 1: // écouter un autre morceau → on reboucle
+                    break;
+                case 2: // retour au menu précédent
+                    quitter = true;
+                    break;
+                default:
+                    vue.afficherChoixInvalide();
+            }
         }
+
+        if (compteur >= maxEcoutes && !estAbonne) {
+            vue.afficherLimiteEcoutesAtteinte();
+        }
+    }
+
+    // ==================== HISTORIQUE ====================
+
+    private void consulterHistorique() {
+        List<Historique> historique = Historique.getHistoriqueClient(utilisateur.getID());
+        vue.afficherHistorique(historique);
     }
 }

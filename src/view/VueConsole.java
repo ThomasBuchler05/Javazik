@@ -1,6 +1,8 @@
 package view;
 
 import model.Musique;
+import model.Historique;
+import java.util.List;
 import java.util.Scanner;
 
 public class VueConsole {
@@ -70,7 +72,7 @@ public class VueConsole {
     // ==================== CONNEXION ====================
 
     public void afficherConnexionAdmin() {
-       System.out.println("Veuillez êtes en connexion admin");
+        System.out.println("Veuillez êtes en connexion admin");
     }
 
     public String demanderMail() {
@@ -168,9 +170,51 @@ public class VueConsole {
 
     // ==================== VISITEUR / ECOUTE ====================
 
-    public String demanderRecherche() {
-        System.out.println("Quelle musique voulez vous ajouter à la playlist ? Titre ou Artiste que vous souhaitez ajouter : ");
+    public String demanderRechercheMusique() {
+        System.out.print("\nQuelle musique voulez-vous ecouter ? (titre ou artiste) : ");
         return clavier.nextLine();
+    }
+
+    /**
+     * Sous-menu affiché quand la recherche n'a rien donné.
+     * Retourne 1 = réessayer, 2 = retour menu
+     */
+    public int afficherMenuApresEchecRecherche() {
+        System.out.println("1. Rechercher un autre morceau");
+        System.out.println("2. Retour au menu");
+        System.out.print("Votre choix : ");
+        try {
+            int choix = Integer.parseInt(clavier.nextLine().trim());
+            return choix;
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    /**
+     * Sous-menu affiché après chaque écoute réussie.
+     * @param ecoutesRestantes -1 si illimité, sinon le nombre restant
+     * Retourne 1 = écouter un autre, 2 = retour menu
+     */
+    public int afficherMenuApresEcoute(int ecoutesRestantes) {
+        System.out.println();
+        if (ecoutesRestantes >= 0) {
+            System.out.println("Il vous reste " + ecoutesRestantes + " ecoute(s) disponible(s).");
+        }
+        System.out.println("1. Ecouter un autre morceau");
+        System.out.println("2. Retour au menu");
+        System.out.print("Votre choix : ");
+        try {
+            int choix = Integer.parseInt(clavier.nextLine().trim());
+            return choix;
+        } catch (NumberFormatException e) {
+            return 2;
+        }
+    }
+
+    public void afficherLimiteEcoutesAtteinte() {
+        System.out.println("\nVous avez atteint la limite d'ecoutes pour cette session.");
+        System.out.println("Creez un compte pour profiter d'ecoutes illimitees !");
     }
 
     public void afficherMusique(Musique m) {
@@ -291,12 +335,67 @@ public class VueConsole {
         System.out.println(">>> Fin de la playlist : " + nom + " <<<");
     }
 
+    /**
+     * Affiche le morceau en cours avec sa position dans la playlist.
+     */
+    public void afficherPochette(int position, int total, Musique m) {
+        System.out.println("\n  ♪ Morceau " + position + "/" + total);
+        System.out.println("  Titre   : " + m.getTitre());
+        System.out.println("  Artiste : " + m.getArtiste());
+        System.out.println("  Annee   : " + m.getAnnee());
+    }
+
+    /**
+     * Affiche les contrôles du lecteur après un morceau.
+     * @param peutReculer  true si un morceau précédent existe
+     * @param peutAvancer  true si un morceau suivant existe
+     * @return choix de l'utilisateur (1=précédent, 2=suivant, 3=stop)
+     */
+    public int afficherControlesLecteur(boolean peutReculer, boolean peutAvancer) {
+        System.out.println();
+        if (peutReculer)  System.out.println("1. Morceau precedent");
+        if (peutAvancer)  System.out.println("2. Morceau suivant");
+        System.out.println("3. Arreter la playlist");
+        System.out.print("Votre choix : ");
+        try {
+            int choix = Integer.parseInt(clavier.nextLine().trim());
+            // Si l'utilisateur choisit précédent alors qu'il n'y en a pas, on ignore
+            if (choix == 1 && !peutReculer) return 2;
+            // Si l'utilisateur choisit suivant alors qu'il n'y en a pas, on passe à fin
+            if (choix == 2 && !peutAvancer) return 3;
+            return choix;
+        } catch (NumberFormatException e) {
+            return 2; // par défaut : morceau suivant
+        }
+    }
+
     public void afficherPlaylistVide() {
         System.out.println("Cette playlist est vide, ajoutez des musiques d'abord !");
     }
 
     public void afficherErreurId() {
         System.out.println("ID invalide ou introuvable.");
+    }
+
+    // ==================== HISTORIQUE ====================
+
+    /**
+     * Affiche l'historique d'écoute d'un abonné (du plus récent au plus ancien).
+     *
+     * @param historique liste des entrées d'historique
+     */
+    public void afficherHistorique(List<Historique> historique) {
+        System.out.println("\n========== HISTORIQUE D'ECOUTE ==========");
+        if (historique.isEmpty()) {
+            System.out.println("Vous n'avez encore ecouté aucun morceau.");
+        } else {
+            int num = 1;
+            for (Historique h : historique) {
+                System.out.println(num + ". " + h);
+                num++;
+            }
+        }
+        System.out.println("=========================================");
     }
 
     // ==================== DIVERS ====================
