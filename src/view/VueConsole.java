@@ -70,13 +70,14 @@ public class VueConsole {
     // ==================== CONNEXION ====================
 
     public void afficherConnexionAdmin() {
-        System.out.println("Veuillez êtes en connexion admin");
+       System.out.println("Veuillez êtes en connexion admin");
     }
 
     public String demanderMail() {
         System.out.print("Veuillez entrer votre mail : ");
         return clavier.nextLine();
     }
+
 
     public String demanderMdp() {
         System.out.println("Veuillez entrer votre mot de passe :");
@@ -88,6 +89,7 @@ public class VueConsole {
     }
 
     public void afficherMailIncorrect() {
+
         System.out.println("Mail incorecte !");
     }
 
@@ -167,7 +169,7 @@ public class VueConsole {
     // ==================== VISITEUR / ECOUTE ====================
 
     public String demanderRecherche() {
-        System.out.println("Quelle musique recherchez-vous ? Titre ou Artiste que vous cherchez : ");
+        System.out.println("Quelle musique voulez vous ajouter à la playlist ? Titre ou Artiste que vous souhaitez ajouter : ");
         return clavier.nextLine();
     }
 
