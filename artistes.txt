@@ -1,0 +1,15 @@
+1;Mercury;Freddie;Britannique
+2;Jackson;Michael;Americain
+3;Cobain;Kurt;Americain
+4;Sheeran;Ed;Britannique
+5;Tesfaye;Abel;Canadien
+6;Adkins;Adele;Britannique
+7;Mathers;Eminem;Americain
+8;Henley;Don;Americain
+9;Frey;Glenn;Americain
+10;May;Brian;Britannique
+11;Deacon;John;Britannique
+12;Taylor;Roger;Britannique
+13;Grohl;Dave;Americain
+14;Novoselic;Krist;Americain
+15;Styles;Harry;Britannique

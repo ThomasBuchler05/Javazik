@@ -1,201 +1,589 @@
 package view;
 
-import model.Musique;
-import model.Historique;
+import model.*;
 import java.util.List;
 import java.util.Scanner;
 
+/**
+ * Vue console : gère tout l'affichage et la saisie utilisateur.
+ * Ne contient aucune logique métier.
+ */
 public class VueConsole {
 
     private Scanner clavier = new Scanner(System.in);
 
+    // ==================== UTILITAIRE SAISIE ====================
+
+    /**
+     * Lit un entier de manière sécurisée (gère les erreurs de saisie).
+     */
+    private int lireEntier() {
+        while (true) {
+            try {
+                int val = Integer.parseInt(clavier.nextLine().trim());
+                return val;
+            } catch (NumberFormatException e) {
+                System.out.print("Saisie invalide, entrez un nombre : ");
+            }
+        }
+    }
+
     // ==================== MENU PRINCIPAL ====================
 
     public void afficherBienvenue() {
-        System.out.println("BIENVENUE SUR JAVAZIK");
-        System.out.println("Chargement de l'application !");
-        for (int i = 0; i < 50; i++) {
-            System.out.print("-");
-            try {
-                Thread.sleep(30);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-        System.out.println();
+        System.out.println("\n====================================");
+        System.out.println("     BIENVENUE SUR JAVAZIK");
+        System.out.println("====================================");
     }
 
     public int afficherMenuPrincipal() {
-        System.out.println("\n1. Se connecter en tant qu'administrateur");
+        System.out.println("\n--- MENU PRINCIPAL ---");
+        System.out.println("1. Se connecter en tant qu'administrateur");
         System.out.println("2. Se connecter en tant que client");
-        System.out.println("3. Créer un compte client");
+        System.out.println("3. Creer un compte client");
         System.out.println("4. Continuer en tant que simple visiteur");
         System.out.println("5. Quitter");
-        int choix;
-        do {
-            System.out.println("Entrez votre choix: ");
-            choix = clavier.nextInt();
-            if (choix < 1 || choix > 5) {
-                System.out.println("Votre valeur entré est incorrecte !");
-            }
-        } while (choix < 1 || choix > 5);
+        System.out.print("Votre choix : ");
+        int choix = lireEntier();
+        while (choix < 1 || choix > 5) {
+            System.out.print("Choix invalide (1-5) : ");
+            choix = lireEntier();
+        }
         return choix;
     }
 
     // ==================== MENU ADMIN ====================
 
     public int afficherMenuAdmin() {
-        System.out.println("\n  MENU ADMINISTRATEUR ");
-        System.out.println("1. Ajouter une musique");
-        System.out.println("2. Supprimer une musique");
-        System.out.println("3. Quitter le menu admin");
+        System.out.println("\n--- MENU ADMINISTRATEUR ---");
+        System.out.println("1. Ajouter un morceau");
+        System.out.println("2. Supprimer un morceau");
+        System.out.println("3. Ajouter un album");
+        System.out.println("4. Supprimer un album");
+        System.out.println("5. Ajouter un artiste");
+        System.out.println("6. Supprimer un artiste");
+        System.out.println("7. Ajouter un groupe");
+        System.out.println("8. Supprimer un groupe");
+        System.out.println("9. Gerer les comptes abonnes");
+        System.out.println("10. Consulter les statistiques");
+        System.out.println("11. Retour au menu principal");
         System.out.print("Votre choix : ");
-        int choix = clavier.nextInt();
-        clavier.nextLine(); // vider le buffer
-        return choix;
+        return lireEntier();
     }
 
     // ==================== MENU CLIENT ====================
 
     public int afficherMenuClient() {
-        System.out.println("\n  MENU Client ");
-        System.out.println("1. Créer et gérer une playlist");
-        System.out.println("2. Ecouter une musique");
-        System.out.println("3. Consulter l'historique d'écoute");
-        System.out.println("4. Revenir au menu principal");
+        System.out.println("\n--- MENU CLIENT ---");
+        System.out.println("1. Consulter le catalogue");
+        System.out.println("2. Creer et gerer une playlist");
+        System.out.println("3. Ecouter un morceau");
+        System.out.println("4. Consulter l'historique d'ecoute");
+        System.out.println("5. Revenir au menu principal");
         System.out.print("Votre choix : ");
-        int choix = clavier.nextInt();
-        clavier.nextLine();
-        return choix;
+        return lireEntier();
+    }
+
+    // ==================== MENU VISITEUR ====================
+
+    public int afficherMenuVisiteur() {
+        System.out.println("\n--- MENU VISITEUR ---");
+        System.out.println("1. Consulter le catalogue");
+        System.out.println("2. Ecouter un morceau (5 ecoutes max)");
+        System.out.println("3. Retour au menu principal");
+        System.out.print("Votre choix : ");
+        return lireEntier();
+    }
+
+    // ==================== CATALOGUE : MENU NAVIGATION ====================
+
+    public int afficherMenuCatalogue() {
+        System.out.println("\n--- CATALOGUE MUSICAL ---");
+        System.out.println("1. Rechercher (morceau, album, artiste, groupe)");
+        System.out.println("2. Voir tous les morceaux");
+        System.out.println("3. Voir tous les albums");
+        System.out.println("4. Voir tous les artistes");
+        System.out.println("5. Voir tous les groupes");
+        System.out.println("6. Parcourir par genre");
+        System.out.println("7. Retour");
+        System.out.print("Votre choix : ");
+        return lireEntier();
+    }
+
+    public String demanderRecherche() {
+        System.out.print("\nRecherche : ");
+        return clavier.nextLine();
+    }
+
+    // ==================== AFFICHAGE RESULTATS RECHERCHE ====================
+
+    public void afficherResultatsRecherche(Catalogue.ResultatRecherche r) {
+        if (r.estVide()) {
+            System.out.println("Aucun resultat trouve.");
+            return;
+        }
+        System.out.println("\n" + r.getNombreTotal() + " resultat(s) trouve(s) :");
+
+        if (!r.morceaux.isEmpty()) {
+            System.out.println("\n  -- Morceaux --");
+            for (Morceau m : r.morceaux) {
+                System.out.println("  " + m);
+            }
+        }
+        if (!r.albums.isEmpty()) {
+            System.out.println("\n  -- Albums --");
+            for (Album a : r.albums) {
+                System.out.println("  " + a);
+            }
+        }
+        if (!r.artistes.isEmpty()) {
+            System.out.println("\n  -- Artistes --");
+            for (Artiste a : r.artistes) {
+                System.out.println("  " + a);
+            }
+        }
+        if (!r.groupes.isEmpty()) {
+            System.out.println("\n  -- Groupes --");
+            for (Groupe g : r.groupes) {
+                System.out.println("  " + g);
+            }
+        }
+    }
+
+    // ==================== NAVIGATION DÉTAILLÉE ====================
+
+    /**
+     * Menu de navigation après affichage des résultats.
+     */
+    public int afficherMenuNavigation() {
+        System.out.println("\n--- NAVIGATION ---");
+        System.out.println("1. Voir les details d'un morceau (par ID)");
+        System.out.println("2. Voir les details d'un album (par ID)");
+        System.out.println("3. Voir les details d'un artiste (par ID)");
+        System.out.println("4. Voir les details d'un groupe (par ID)");
+        System.out.println("5. Retour");
+        System.out.print("Votre choix : ");
+        return lireEntier();
+    }
+
+    public int demanderIdElement() {
+        System.out.print("ID : ");
+        return lireEntier();
+    }
+
+    // --- Détails morceau ---
+    public void afficherDetailsMorceau(Morceau m) {
+        System.out.println("\n====== MORCEAU ======");
+        System.out.println("  ID        : " + m.getId());
+        System.out.println("  Titre     : " + m.getTitre());
+        System.out.println("  Interprete: " + m.getNomInterprete());
+        System.out.println("  Genre     : " + m.getGenre());
+        System.out.println("  Annee     : " + m.getAnnee());
+        System.out.println("  Duree     : " + m.getDureeFormatee());
+    }
+
+    public void afficherAlbumsDuMorceau(List<Album> albums) {
+        if (albums.isEmpty()) {
+            System.out.println("  Albums    : (aucun)");
+        } else {
+            System.out.println("  Present dans :");
+            for (Album a : albums) {
+                System.out.println("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
+            }
+        }
+    }
+
+    public void afficherAutresMorceauxInterprete(List<Morceau> autres) {
+        if (!autres.isEmpty()) {
+            System.out.println("  Autres morceaux du meme interprete :");
+            for (Morceau m : autres) {
+                System.out.println("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
+            }
+        }
+    }
+
+    // --- Détails album ---
+    public void afficherDetailsAlbum(Album a) {
+        System.out.println("\n====== ALBUM ======");
+        System.out.println("  ID        : " + a.getId());
+        System.out.println("  Titre     : " + a.getTitre());
+        System.out.println("  Interprete: " + a.getNomInterprete());
+        System.out.println("  Annee     : " + a.getAnnee());
+        System.out.println("  Duree     : " + a.getDureeTotaleFormatee());
+        System.out.println("  Pistes    :");
+        int num = 1;
+        for (Morceau m : a.getMorceaux()) {
+            System.out.println("    " + num + ". " + m.getTitre() + " (" + m.getDureeFormatee() + ") [ID:" + m.getId() + "]");
+            num++;
+        }
+    }
+
+    public void afficherAutresAlbumsInterprete(List<Album> autres) {
+        if (!autres.isEmpty()) {
+            System.out.println("  Autres albums du meme interprete :");
+            for (Album a : autres) {
+                System.out.println("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
+            }
+        }
+    }
+
+    // --- Détails artiste ---
+    public void afficherDetailsArtiste(Artiste a) {
+        System.out.println("\n====== ARTISTE ======");
+        System.out.println("  ID          : " + a.getId());
+        System.out.println("  Nom         : " + a.getNomComplet());
+        System.out.println("  Nationalite : " + a.getNationalite());
+    }
+
+    public void afficherGroupesDeLArtiste(List<Groupe> groupes) {
+        if (!groupes.isEmpty()) {
+            System.out.println("  Membre de :");
+            for (Groupe g : groupes) {
+                System.out.println("    - " + g.getNom() + " [ID:" + g.getId() + "]");
+            }
+        }
+    }
+
+    public void afficherMorceauxArtiste(List<Morceau> morceaux) {
+        if (!morceaux.isEmpty()) {
+            System.out.println("  Morceaux :");
+            for (Morceau m : morceaux) {
+                System.out.println("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
+            }
+        }
+    }
+
+    public void afficherAlbumsArtiste(List<Album> albums) {
+        if (!albums.isEmpty()) {
+            System.out.println("  Albums :");
+            for (Album a : albums) {
+                System.out.println("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
+            }
+        }
+    }
+
+    // --- Détails groupe ---
+    public void afficherDetailsGroupe(Groupe g) {
+        System.out.println("\n====== GROUPE ======");
+        System.out.println("  ID          : " + g.getId());
+        System.out.println("  Nom         : " + g.getNom());
+        System.out.println("  Cree en     : " + g.getDateCreation());
+        System.out.println("  Nationalite : " + g.getNationalite());
+        if (!g.getMembres().isEmpty()) {
+            System.out.println("  Membres :");
+            for (Artiste a : g.getMembres()) {
+                System.out.println("    - " + a.getNomComplet() + " [ID:" + a.getId() + "]");
+            }
+        }
+    }
+
+    public void afficherMorceauxGroupe(List<Morceau> morceaux) {
+        if (!morceaux.isEmpty()) {
+            System.out.println("  Morceaux :");
+            for (Morceau m : morceaux) {
+                System.out.println("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
+            }
+        }
+    }
+
+    public void afficherAlbumsGroupe(List<Album> albums) {
+        if (!albums.isEmpty()) {
+            System.out.println("  Albums :");
+            for (Album a : albums) {
+                System.out.println("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
+            }
+        }
+    }
+
+    // --- Listes complètes ---
+    public void afficherListeMorceaux(List<Morceau> morceaux) {
+        System.out.println("\n--- TOUS LES MORCEAUX (" + morceaux.size() + ") ---");
+        for (Morceau m : morceaux) {
+            System.out.println("  " + m);
+        }
+    }
+
+    public void afficherListeAlbums(List<Album> albums) {
+        System.out.println("\n--- TOUS LES ALBUMS (" + albums.size() + ") ---");
+        for (Album a : albums) {
+            System.out.println("  " + a);
+        }
+    }
+
+    public void afficherListeArtistes(List<Artiste> artistes) {
+        System.out.println("\n--- TOUS LES ARTISTES (" + artistes.size() + ") ---");
+        for (Artiste a : artistes) {
+            System.out.println("  " + a);
+        }
+    }
+
+    public void afficherListeGroupes(List<Groupe> groupes) {
+        System.out.println("\n--- TOUS LES GROUPES (" + groupes.size() + ") ---");
+        for (Groupe g : groupes) {
+            System.out.println("  " + g);
+        }
+    }
+
+    // --- Genre ---
+    public void afficherGenresDisponibles(List<String> genres) {
+        System.out.println("\n--- GENRES DISPONIBLES ---");
+        for (int i = 0; i < genres.size(); i++) {
+            System.out.println("  " + (i + 1) + ". " + genres.get(i));
+        }
+        System.out.print("Choisissez un genre (numero) : ");
     }
 
     // ==================== CONNEXION ====================
 
     public void afficherConnexionAdmin() {
-        System.out.println("Veuillez êtes en connexion admin");
+        System.out.println("\n--- Connexion administrateur ---");
     }
 
     public String demanderMail() {
-        System.out.print("Veuillez entrer votre mail : ");
+        System.out.print("Votre mail : ");
         return clavier.nextLine();
     }
 
-
     public String demanderMdp() {
-        System.out.println("Veuillez entrer votre mot de passe :");
+        System.out.print("Votre mot de passe : ");
         return clavier.nextLine();
     }
 
     public void afficherMdpIncorrect() {
-        System.out.println("Mot de passe incorrecte!");
+        System.out.println("Mot de passe incorrect !");
     }
 
     public void afficherMailIncorrect() {
-
-        System.out.println("Mail incorecte !");
+        System.out.println("Mail incorrect !");
     }
 
     public void afficherPasAdmin() {
-        System.out.println("Vous n'êtes pas admin");
+        System.out.println("Ce compte n'est pas administrateur.");
     }
 
     public void afficherConnexionReussie() {
-        System.out.println("Connexion réussie !");
+        System.out.println("Connexion reussie !");
     }
 
     // ==================== INSCRIPTION ====================
 
     public String demanderNom() {
-        System.out.println("Entrez votre nom : ");
+        System.out.print("Nom : ");
         return clavier.nextLine();
     }
 
     public String demanderPrenom() {
-        System.out.print("Entrez votre prénom : ");
+        System.out.print("Prenom : ");
         return clavier.nextLine();
     }
 
     public String demanderEmail() {
-        System.out.print("Entrez votre email : ");
+        System.out.print("Email : ");
         return clavier.nextLine();
     }
 
     public String demanderMotDePasse() {
-        System.out.print("Entrez votre mot de passe : ");
+        System.out.print("Mot de passe : ");
         return clavier.nextLine();
     }
 
     public void afficherInscriptionReussie() {
-        System.out.println("Inscription réussie !");
-        System.out.println("Écriture réussie !");
+        System.out.println("Inscription reussie !");
     }
 
-    // ==================== MUSIQUE (ADMIN) ====================
+    // ==================== ADMIN : MORCEAUX ====================
 
-    public String demanderTitreMusique() {
-        System.out.println("Veuillez saisir le Titre de la musique");
+    public String demanderTitreMorceau() {
+        System.out.print("Titre du morceau : ");
         return clavier.nextLine();
     }
 
-    public String demanderArtisteMusique() {
-        System.out.println("Veuillez saisir l'artiste de la musique");
+    public int demanderDureeMorceau() {
+        System.out.print("Duree (en secondes) : ");
+        return lireEntier();
+    }
+
+    public String demanderGenreMorceau() {
+        System.out.print("Genre : ");
         return clavier.nextLine();
     }
 
-    public int demanderAnneeMusique() {
-        System.out.println("Veuillez saisir l'année de la musique");
-        int annee = clavier.nextInt();
-        clavier.nextLine();
-        return annee;
+    public int demanderAnneeMorceau() {
+        System.out.print("Annee : ");
+        return lireEntier();
     }
 
-    public void afficherMusiqueAjoutee(int id) {
-        System.out.println("Musique ajoutée ! (ID : " + id + ")");
+    public int demanderIdArtisteMorceau() {
+        System.out.print("ID de l'artiste (0 si c'est un groupe) : ");
+        return lireEntier();
+    }
+
+    public int demanderIdGroupeMorceau() {
+        System.out.print("ID du groupe (0 si c'est un artiste solo) : ");
+        return lireEntier();
+    }
+
+    public void afficherMorceauAjoute(int id) {
+        System.out.println("Morceau ajoute avec succes (ID : " + id + ")");
     }
 
     public int demanderIdSuppression() {
-        System.out.println("Veuillez saisir l'ID de la musique à supprimer");
-        int id = clavier.nextInt();
-        clavier.nextLine();
-        return id;
+        System.out.print("ID de l'element a supprimer : ");
+        return lireEntier();
     }
 
-    public void afficherMusiqueSupprimee() {
-        System.out.println("Musique supprimée !");
+    public void afficherElementSupprime(String type) {
+        System.out.println(type + " supprime(e) avec succes !");
     }
 
-    public void afficherMusiqueNonTrouvee(int id) {
-        System.out.println("Aucune musique trouvée avec l'ID " + id);
+    public void afficherElementNonTrouve(String type, int id) {
+        System.out.println("Aucun(e) " + type + " trouve(e) avec l'ID " + id);
     }
 
-    // ==================== VISITEUR / ECOUTE ====================
+    // ==================== ADMIN : ALBUMS ====================
 
-    public String demanderRechercheMusique() {
-        System.out.print("\nQuelle musique voulez-vous ecouter ? (titre ou artiste) : ");
+    public String demanderTitreAlbum() {
+        System.out.print("Titre de l'album : ");
         return clavier.nextLine();
     }
 
-    /**
-     * Sous-menu affiché quand la recherche n'a rien donné.
-     * Retourne 1 = réessayer, 2 = retour menu
-     */
+    public int demanderAnneeAlbum() {
+        System.out.print("Annee de sortie : ");
+        return lireEntier();
+    }
+
+    public int demanderIdArtisteAlbum() {
+        System.out.print("ID de l'artiste (0 si c'est un groupe) : ");
+        return lireEntier();
+    }
+
+    public int demanderIdGroupeAlbum() {
+        System.out.print("ID du groupe (0 si c'est un artiste solo) : ");
+        return lireEntier();
+    }
+
+    public void afficherAlbumAjoute(int id) {
+        System.out.println("Album ajoute avec succes (ID : " + id + ")");
+    }
+
+    // ==================== ADMIN : ARTISTES ====================
+
+    public String demanderNomArtiste() {
+        System.out.print("Nom de l'artiste : ");
+        return clavier.nextLine();
+    }
+
+    public String demanderPrenomArtiste() {
+        System.out.print("Prenom de l'artiste : ");
+        return clavier.nextLine();
+    }
+
+    public String demanderNationaliteArtiste() {
+        System.out.print("Nationalite : ");
+        return clavier.nextLine();
+    }
+
+    public void afficherArtisteAjoute(int id) {
+        System.out.println("Artiste ajoute avec succes (ID : " + id + ")");
+    }
+
+    // ==================== ADMIN : GROUPES ====================
+
+    public String demanderNomGroupe() {
+        System.out.print("Nom du groupe : ");
+        return clavier.nextLine();
+    }
+
+    public int demanderDateCreationGroupe() {
+        System.out.print("Annee de creation : ");
+        return lireEntier();
+    }
+
+    public String demanderNationaliteGroupe() {
+        System.out.print("Nationalite : ");
+        return clavier.nextLine();
+    }
+
+    public void afficherGroupeAjoute(int id) {
+        System.out.println("Groupe ajoute avec succes (ID : " + id + ")");
+    }
+
+    // ==================== ADMIN : GESTION COMPTES ====================
+
+    public void afficherListeAbonnes(List<String[]> abonnes) {
+        System.out.println("\n--- COMPTES ABONNES ---");
+        if (abonnes.isEmpty()) {
+            System.out.println("Aucun abonne.");
+            return;
+        }
+        for (String[] a : abonnes) {
+            System.out.println("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4]);
+        }
+    }
+
+    public int afficherMenuGestionComptes() {
+        System.out.println("\n1. Supprimer un compte abonne");
+        System.out.println("2. Retour");
+        System.out.print("Votre choix : ");
+        return lireEntier();
+    }
+
+    public int demanderIdAbonne() {
+        System.out.print("ID de l'abonne : ");
+        return lireEntier();
+    }
+
+    public void afficherAbonneSupprime() {
+        System.out.println("Compte abonne supprime.");
+    }
+
+    public void afficherAbonneNonTrouve() {
+        System.out.println("Abonne non trouve.");
+    }
+
+    // ==================== ADMIN : STATISTIQUES ====================
+
+    public void afficherStatistiques(int nbMorceaux, int nbAlbums, int nbArtistes,
+                                      int nbGroupes, int nbUtilisateurs, int nbEcoutes) {
+        System.out.println("\n--- STATISTIQUES ---");
+        System.out.println("  Morceaux      : " + nbMorceaux);
+        System.out.println("  Albums        : " + nbAlbums);
+        System.out.println("  Artistes      : " + nbArtistes);
+        System.out.println("  Groupes       : " + nbGroupes);
+        System.out.println("  Utilisateurs  : " + nbUtilisateurs);
+        System.out.println("  Ecoutes total : " + nbEcoutes);
+    }
+
+    // ==================== ECOUTE ====================
+
+    public String demanderRechercheMusique() {
+        System.out.print("\nRecherchez un morceau (titre, artiste ou genre) : ");
+        return clavier.nextLine();
+    }
+
+    public void afficherResultatsEcoute(List<Morceau> resultats) {
+        if (resultats.isEmpty()) {
+            System.out.println("Aucun morceau trouve.");
+            return;
+        }
+        System.out.println("\nResultats :");
+        for (Morceau m : resultats) {
+            System.out.println("  " + m);
+        }
+    }
+
+    public int demanderIdMorceauEcoute() {
+        System.out.print("ID du morceau a ecouter : ");
+        return lireEntier();
+    }
+
     public int afficherMenuApresEchecRecherche() {
         System.out.println("1. Rechercher un autre morceau");
         System.out.println("2. Retour au menu");
         System.out.print("Votre choix : ");
-        try {
-            int choix = Integer.parseInt(clavier.nextLine().trim());
-            return choix;
-        } catch (NumberFormatException e) {
-            return 1;
-        }
+        return lireEntier();
     }
 
-    /**
-     * Sous-menu affiché après chaque écoute réussie.
-     * @param ecoutesRestantes -1 si illimité, sinon le nombre restant
-     * Retourne 1 = écouter un autre, 2 = retour menu
-     */
     public int afficherMenuApresEcoute(int ecoutesRestantes) {
         System.out.println();
         if (ecoutesRestantes >= 0) {
@@ -204,12 +592,7 @@ public class VueConsole {
         System.out.println("1. Ecouter un autre morceau");
         System.out.println("2. Retour au menu");
         System.out.print("Votre choix : ");
-        try {
-            int choix = Integer.parseInt(clavier.nextLine().trim());
-            return choix;
-        } catch (NumberFormatException e) {
-            return 2;
-        }
+        return lireEntier();
     }
 
     public void afficherLimiteEcoutesAtteinte() {
@@ -217,48 +600,32 @@ public class VueConsole {
         System.out.println("Creez un compte pour profiter d'ecoutes illimitees !");
     }
 
-    public void afficherMusique(Musique m) {
-        System.out.println("ID : " + m.getId());
-        System.out.println("Titre : " + m.getTitre());
-        System.out.println("Artiste : " + m.getArtiste());
-        System.out.println("Année : " + m.getAnnee());
-    }
-
-    public void afficherEcoute() {
-        for (int i = 0; i < 15; i++) {
-            System.out.print("-");
-            try {
-                Thread.sleep(150);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+    public void afficherEcoute(Morceau m) {
+        System.out.println("\n  ♪ Lecture : " + m.getTitre() + " - " + m.getNomInterprete());
+        System.out.print("  ");
+        int ticks = Math.min(m.getDuree() / 20, 20); // simulation proportionnelle, max 20
+        if (ticks < 5) ticks = 5;
+        for (int i = 0; i < ticks; i++) {
+            System.out.print("▓");
+            try { Thread.sleep(100); } catch (InterruptedException e) {}
         }
-        System.out.println();
-    }
-
-    public void afficherAucuneMusiqueTrouvee() {
-        System.out.println("Aucune musique trouvée avec ce titre.");
-    }
-
-    public void afficherEcoutesRestantes(int restantes) {
-        System.out.println("\nIl vous reste " + restantes + " musiques que vous pouvez écouter, pour plus d'essais prenez un abonnements à 1900 euros par semaines.");
+        System.out.println(" (" + m.getDureeFormatee() + ")");
     }
 
     // ==================== PLAYLISTS ====================
 
     public int afficherMenuPlaylist() {
-        System.out.println("\n  GESTION DES PLAYLISTS ");
+        System.out.println("\n--- GESTION DES PLAYLISTS ---");
         System.out.println("1. Creer une nouvelle playlist");
         System.out.println("2. Voir mes playlists");
-        System.out.println("3. Ajouter une musique a une playlist");
-        System.out.println("4. Retirer une musique d'une playlist");
+        System.out.println("3. Ajouter un morceau a une playlist");
+        System.out.println("4. Retirer un morceau d'une playlist");
         System.out.println("5. Ecouter une playlist");
-        System.out.println("6. Supprimer une playlist");
-        System.out.println("7. Retour au menu client");
+        System.out.println("6. Renommer une playlist");
+        System.out.println("7. Supprimer une playlist");
+        System.out.println("8. Retour au menu client");
         System.out.print("Votre choix : ");
-        int choix = clavier.nextInt();
-        clavier.nextLine();
-        return choix;
+        return lireEntier();
     }
 
     public String demanderNomPlaylist() {
@@ -266,57 +633,66 @@ public class VueConsole {
         return clavier.nextLine();
     }
 
-    public int demanderIdPlaylist() {
-        System.out.print("ID de la playlist : ");
-        int id = clavier.nextInt();
-        clavier.nextLine();
-        return id;
+    public String demanderNouveauNomPlaylist() {
+        System.out.print("Nouveau nom de la playlist : ");
+        return clavier.nextLine();
     }
 
-    public int demanderIdMusique() {
-        System.out.print("ID de la musique : ");
-        int id = clavier.nextInt();
-        clavier.nextLine();
-        return id;
+    public int demanderIdPlaylist() {
+        System.out.print("ID de la playlist : ");
+        return lireEntier();
+    }
+
+    public int demanderIdMorceau() {
+        System.out.print("ID du morceau : ");
+        return lireEntier();
     }
 
     public void afficherPlaylistCreee(int id, String nom) {
-        System.out.println("Playlist \"" + nom + "\" creee avec succes (ID : " + id + ") !");
+        System.out.println("Playlist \"" + nom + "\" creee avec succes (ID : " + id + ")");
     }
 
-    public void afficherListePlaylists(java.util.List<model.Playlist> playlists) {
+    public void afficherPlaylistRenommee(String ancienNom, String nouveauNom) {
+        System.out.println("Playlist \"" + ancienNom + "\" renommee en \"" + nouveauNom + "\"");
+    }
+
+    public void afficherListePlaylists(List<Playlist> playlists) {
         if (playlists.isEmpty()) {
             System.out.println("Vous n'avez aucune playlist pour le moment.");
             return;
         }
         System.out.println("\n--- Vos playlists ---");
-        for (model.Playlist p : playlists) {
-            System.out.println(p);
+        for (Playlist p : playlists) {
+            System.out.println("  " + p);
         }
     }
 
-    public void afficherContenuPlaylist(model.Playlist playlist) {
+    public void afficherContenuPlaylist(Playlist playlist) {
         System.out.println("\n--- Playlist : " + playlist.getNom() + " ---");
-        java.util.List<model.Musique> musiques = playlist.getMusiques();
-        if (musiques.isEmpty()) {
-            System.out.println("  (aucune musique dans cette playlist)");
+        List<Morceau> morceaux = playlist.getMorceaux();
+        if (morceaux.isEmpty()) {
+            System.out.println("  (aucun morceau dans cette playlist)");
         } else {
-            for (model.Musique m : musiques) {
-                System.out.println("  [" + m.getId() + "] " + m.getTitre() + " - " + m.getArtiste() + " (" + m.getAnnee() + ")");
+            int num = 1;
+            for (Morceau m : morceaux) {
+                System.out.println("  " + num + ". " + m.getTitre() + " - " + m.getNomInterprete()
+                                   + " (" + m.getDureeFormatee() + ") [ID:" + m.getId() + "]");
+                num++;
             }
+            System.out.println("  Duree totale : " + playlist.getDureeTotaleFormatee());
         }
     }
 
-    public void afficherMusiqueAjouteePlaylist(String titre, String nomPlaylist) {
-        System.out.println("\"" + titre + "\" ajoutee a la playlist \"" + nomPlaylist + "\" !");
+    public void afficherMorceauAjoutePlaylist(String titre, String nomPlaylist) {
+        System.out.println("\"" + titre + "\" ajoute a la playlist \"" + nomPlaylist + "\"");
     }
 
-    public void afficherMusiqueDejaPresente() {
-        System.out.println("Cette musique est deja dans la playlist.");
+    public void afficherMorceauDejaPresent() {
+        System.out.println("Ce morceau est deja dans la playlist.");
     }
 
-    public void afficherMusiqueRetirée() {
-        System.out.println("Musique retiree de la playlist.");
+    public void afficherMorceauRetire() {
+        System.out.println("Morceau retire de la playlist.");
     }
 
     public void afficherPlaylistSupprimee(String nom) {
@@ -335,63 +711,40 @@ public class VueConsole {
         System.out.println(">>> Fin de la playlist : " + nom + " <<<");
     }
 
-    /**
-     * Affiche le morceau en cours avec sa position dans la playlist.
-     */
-    public void afficherPochette(int position, int total, Musique m) {
+    public void afficherPochette(int position, int total, Morceau m) {
         System.out.println("\n  ♪ Morceau " + position + "/" + total);
-        System.out.println("  Titre   : " + m.getTitre());
-        System.out.println("  Artiste : " + m.getArtiste());
-        System.out.println("  Annee   : " + m.getAnnee());
+        System.out.println("  Titre     : " + m.getTitre());
+        System.out.println("  Interprete: " + m.getNomInterprete());
+        System.out.println("  Genre     : " + m.getGenre());
+        System.out.println("  Duree     : " + m.getDureeFormatee());
     }
 
-    /**
-     * Affiche les contrôles du lecteur après un morceau.
-     * @param peutReculer  true si un morceau précédent existe
-     * @param peutAvancer  true si un morceau suivant existe
-     * @return choix de l'utilisateur (1=précédent, 2=suivant, 3=stop)
-     */
     public int afficherControlesLecteur(boolean peutReculer, boolean peutAvancer) {
         System.out.println();
         if (peutReculer)  System.out.println("1. Morceau precedent");
         if (peutAvancer)  System.out.println("2. Morceau suivant");
         System.out.println("3. Arreter la playlist");
         System.out.print("Votre choix : ");
-        try {
-            int choix = Integer.parseInt(clavier.nextLine().trim());
-            // Si l'utilisateur choisit précédent alors qu'il n'y en a pas, on ignore
-            if (choix == 1 && !peutReculer) return 2;
-            // Si l'utilisateur choisit suivant alors qu'il n'y en a pas, on passe à fin
-            if (choix == 2 && !peutAvancer) return 3;
-            return choix;
-        } catch (NumberFormatException e) {
-            return 2; // par défaut : morceau suivant
-        }
+        int choix = lireEntier();
+        if (choix == 1 && !peutReculer) return 2;
+        if (choix == 2 && !peutAvancer) return 3;
+        return choix;
     }
 
     public void afficherPlaylistVide() {
-        System.out.println("Cette playlist est vide, ajoutez des musiques d'abord !");
-    }
-
-    public void afficherErreurId() {
-        System.out.println("ID invalide ou introuvable.");
+        System.out.println("Cette playlist est vide, ajoutez des morceaux d'abord !");
     }
 
     // ==================== HISTORIQUE ====================
 
-    /**
-     * Affiche l'historique d'écoute d'un abonné (du plus récent au plus ancien).
-     *
-     * @param historique liste des entrées d'historique
-     */
     public void afficherHistorique(List<Historique> historique) {
         System.out.println("\n========== HISTORIQUE D'ECOUTE ==========");
         if (historique.isEmpty()) {
-            System.out.println("Vous n'avez encore ecouté aucun morceau.");
+            System.out.println("Vous n'avez encore ecoute aucun morceau.");
         } else {
             int num = 1;
             for (Historique h : historique) {
-                System.out.println(num + ". " + h);
+                System.out.println("  " + num + ". " + h);
                 num++;
             }
         }
@@ -405,6 +758,14 @@ public class VueConsole {
     }
 
     public void afficherRetourMenuPrincipal() {
-        System.out.println("Retour au menu principal");
+        System.out.println("Retour au menu principal.");
+    }
+
+    public void afficherErreurId() {
+        System.out.println("ID invalide ou introuvable.");
+    }
+
+    public void afficherMessage(String message) {
+        System.out.println(message);
     }
 }

@@ -1,0 +1,29 @@
+1;Bohemian Rhapsody;355;Rock;1975;0;1
+2;Billie Jean;294;Pop;1982;2;0
+3;Smells Like Teen Spirit;301;Grunge;1991;0;2
+4;Shape of You;234;Pop;2017;4;0
+5;Blinding Lights;201;Synthwave;2020;5;0
+6;Hotel California;391;Rock;1976;0;3
+7;Rolling in the Deep;228;Pop;2010;6;0
+8;Lose Yourself;326;Rap;2002;7;0
+9;Someone Like You;285;Pop;2011;6;0
+10;Skyfall;286;Pop;2012;6;0
+11;Don't Stop Me Now;209;Rock;1978;0;1
+12;We Will Rock You;122;Rock;1977;0;1
+13;We Are the Champions;181;Rock;1977;0;1
+14;Thriller;357;Pop;1982;2;0
+15;Beat It;258;Pop;1982;2;0
+16;In Bloom;255;Grunge;1991;0;2
+17;Come as You Are;219;Grunge;1992;0;2
+18;Take It Easy;211;Rock;1972;0;3
+19;Desperado;213;Rock;1973;0;3
+20;Set Fire to the Rain;240;Pop;2011;6;0
+21;Hello;295;Pop;2015;6;0
+22;Photograph;258;Pop;2014;4;0
+23;Perfect;263;Pop;2017;4;0
+24;Save Your Tears;215;Synthwave;2020;5;0
+25;After Hours;361;Synthwave;2020;5;0
+26;Watermelon Sugar;174;Pop;2019;15;0
+27;As It Was;167;Pop;2022;15;0
+28;Sign of the Times;341;Pop;2017;15;0
+29;test;180;Rock;2005;16;0

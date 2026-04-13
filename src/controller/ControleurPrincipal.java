@@ -1,14 +1,15 @@
 package controller;
 
-import model.Client;
-import model.Historique;
-import model.Musique;
-import model.Playlist;
-import model.Utilisateur;
+import model.*;
 import view.VueConsole;
 
-import java.util.List;
+import java.io.*;
+import java.util.*;
 
+/**
+ * Contrôleur principal de l'application Javazik.
+ * Fait le lien entre le modèle et la vue.
+ */
 public class ControleurPrincipal {
 
     private VueConsole vue;
@@ -20,75 +21,72 @@ public class ControleurPrincipal {
     }
 
     public void lancer() {
-        while (true) {
-            vue.afficherBienvenue();
+        vue.afficherBienvenue();
+        boolean quitter = false;
+        while (!quitter) {
             int choix = vue.afficherMenuPrincipal();
-
             switch (choix) {
-                case 1:
-                    connexionAdmin();
-                    break;
-                case 2:
-                    connexionClient();
-                    break;
-                case 3:
-                    inscription();
-                    break;
-                case 4:
-                    menuVisiteur();
-                    break;
-                case 5:
-                    System.exit(0);
+                case 1: connexionAdmin(); break;
+                case 2: connexionClient(); break;
+                case 3: inscription(); break;
+                case 4: menuVisiteur(); break;
+                case 5: quitter = true; break;
+                default: vue.afficherChoixInvalide();
             }
         }
+        vue.afficherMessage("Merci d'avoir utilise Javazik. A bientot !");
     }
 
     // ==================== CONNEXION ADMIN ====================
 
     private void connexionAdmin() {
-        boolean connexion = false;
-        while (!connexion) {
-            vue.afficherConnexionAdmin();
-            String mail = vue.demanderMail();
-            String resultat = utilisateur.verifierMailAdmin(mail);
+        vue.afficherConnexionAdmin();
+        String mail = vue.demanderMail();
+        String resultat = utilisateur.verifierMailAdmin(mail);
 
-            if (resultat.equals("MAIL_FOUND")) {
-                String mdpSaisi = vue.demanderMdp();
-                while (!utilisateur.verifierMdp(mdpSaisi)) {
-                    vue.afficherMdpIncorrect();
-                    mdpSaisi = vue.demanderMdp();
-                }
-                vue.afficherConnexionReussie();
-                connexion = true;
-                menuAdmin();
-            } else if (resultat.equals("NOT_ADMIN")) {
-                vue.afficherPasAdmin();
-            } else {
-                vue.afficherMailIncorrect();
+        if (resultat.equals("MAIL_FOUND")) {
+            String mdpSaisi = vue.demanderMdp();
+            int tentatives = 0;
+            while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
+                vue.afficherMdpIncorrect();
+                mdpSaisi = vue.demanderMdp();
+                tentatives++;
             }
+            if (utilisateur.verifierMdp(mdpSaisi)) {
+                vue.afficherConnexionReussie();
+                menuAdmin();
+            } else {
+                vue.afficherMessage("Trop de tentatives, retour au menu principal.");
+            }
+        } else if (resultat.equals("NOT_ADMIN")) {
+            vue.afficherPasAdmin();
+        } else {
+            vue.afficherMailIncorrect();
         }
     }
 
     // ==================== CONNEXION CLIENT ====================
 
     private void connexionClient() {
-        boolean connexion = false;
-        while (!connexion) {
-            String mail = vue.demanderMail();
-            String resultat = utilisateur.verifierMailClient(mail);
+        String mail = vue.demanderMail();
+        String resultat = utilisateur.verifierMailClient(mail);
 
-            if (resultat.equals("MAIL_FOUND")) {
-                String mdpSaisi = vue.demanderMdp();
-                while (!utilisateur.verifierMdp(mdpSaisi)) {
-                    vue.afficherMdpIncorrect();
-                    mdpSaisi = vue.demanderMdp();
-                }
+        if (resultat.equals("MAIL_FOUND")) {
+            String mdpSaisi = vue.demanderMdp();
+            int tentatives = 0;
+            while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
+                vue.afficherMdpIncorrect();
+                mdpSaisi = vue.demanderMdp();
+                tentatives++;
+            }
+            if (utilisateur.verifierMdp(mdpSaisi)) {
                 vue.afficherConnexionReussie();
-                connexion = true;
                 menuClient();
             } else {
-                vue.afficherMailIncorrect();
+                vue.afficherMessage("Trop de tentatives, retour au menu principal.");
             }
+        } else {
+            vue.afficherMailIncorrect();
         }
     }
 
@@ -106,60 +104,339 @@ public class ControleurPrincipal {
     // ==================== MENU ADMIN ====================
 
     private void menuAdmin() {
-        int choixAdmin;
+        int choix;
         do {
-            choixAdmin = vue.afficherMenuAdmin();
-
-            switch (choixAdmin) {
-                case 1:
-                    String titre = vue.demanderTitreMusique();
-                    String artiste = vue.demanderArtisteMusique();
-                    int annee = vue.demanderAnneeMusique();
-                    int nouvelId = Musique.ajouterMusique(titre, artiste, annee);
-                    vue.afficherMusiqueAjoutee(nouvelId);
-                    break;
-                case 2:
-                    int idCible = vue.demanderIdSuppression();
-                    boolean supprime = Musique.supprimerMusique(idCible);
-                    if (supprime) {
-                        vue.afficherMusiqueSupprimee();
-                    } else {
-                        vue.afficherMusiqueNonTrouvee(idCible);
-                    }
-                    break;
-                case 3:
-                    vue.afficherRetourMenuPrincipal();
-                    break;
-                default:
-                    vue.afficherChoixInvalide();
+            choix = vue.afficherMenuAdmin();
+            switch (choix) {
+                case 1: adminAjouterMorceau(); break;
+                case 2: adminSupprimerMorceau(); break;
+                case 3: adminAjouterAlbum(); break;
+                case 4: adminSupprimerAlbum(); break;
+                case 5: adminAjouterArtiste(); break;
+                case 6: adminSupprimerArtiste(); break;
+                case 7: adminAjouterGroupe(); break;
+                case 8: adminSupprimerGroupe(); break;
+                case 9: adminGererComptes(); break;
+                case 10: adminStatistiques(); break;
+                case 11: vue.afficherRetourMenuPrincipal(); break;
+                default: vue.afficherChoixInvalide();
             }
-        } while (choixAdmin != 3);
+        } while (choix != 11);
+    }
+
+    private void adminAjouterMorceau() {
+        // Afficher artistes et groupes disponibles pour aider
+        vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
+        vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
+
+        String titre = vue.demanderTitreMorceau();
+        int duree = vue.demanderDureeMorceau();
+        String genre = vue.demanderGenreMorceau();
+        int annee = vue.demanderAnneeMorceau();
+        int idArtiste = vue.demanderIdArtisteMorceau();
+        int idGroupe = vue.demanderIdGroupeMorceau();
+        Morceau m = Morceau.ajouter(titre, duree, genre, annee, idArtiste, idGroupe);
+        vue.afficherMorceauAjoute(m.getId());
+    }
+
+    private void adminSupprimerMorceau() {
+        vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
+        int id = vue.demanderIdSuppression();
+        if (Morceau.supprimer(id)) {
+            vue.afficherElementSupprime("Morceau");
+        } else {
+            vue.afficherElementNonTrouve("morceau", id);
+        }
+    }
+
+    private void adminAjouterAlbum() {
+        vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
+        vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
+
+        String titre = vue.demanderTitreAlbum();
+        int annee = vue.demanderAnneeAlbum();
+        int idArtiste = vue.demanderIdArtisteAlbum();
+        int idGroupe = vue.demanderIdGroupeAlbum();
+        Album a = Album.ajouter(titre, annee, idArtiste, idGroupe);
+        vue.afficherAlbumAjoute(a.getId());
+    }
+
+    private void adminSupprimerAlbum() {
+        vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
+        int id = vue.demanderIdSuppression();
+        if (Album.supprimer(id)) {
+            vue.afficherElementSupprime("Album");
+        } else {
+            vue.afficherElementNonTrouve("album", id);
+        }
+    }
+
+    private void adminAjouterArtiste() {
+        String nom = vue.demanderNomArtiste();
+        String prenom = vue.demanderPrenomArtiste();
+        String nationalite = vue.demanderNationaliteArtiste();
+        Artiste a = Artiste.ajouter(nom, prenom, nationalite);
+        vue.afficherArtisteAjoute(a.getId());
+    }
+
+    private void adminSupprimerArtiste() {
+        vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
+        int id = vue.demanderIdSuppression();
+        if (Artiste.supprimer(id)) {
+            vue.afficherElementSupprime("Artiste");
+        } else {
+            vue.afficherElementNonTrouve("artiste", id);
+        }
+    }
+
+    private void adminAjouterGroupe() {
+        String nom = vue.demanderNomGroupe();
+        int date = vue.demanderDateCreationGroupe();
+        String nationalite = vue.demanderNationaliteGroupe();
+        Groupe g = Groupe.ajouter(nom, date, nationalite);
+        vue.afficherGroupeAjoute(g.getId());
+    }
+
+    private void adminSupprimerGroupe() {
+        vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
+        int id = vue.demanderIdSuppression();
+        if (Groupe.supprimer(id)) {
+            vue.afficherElementSupprime("Groupe");
+        } else {
+            vue.afficherElementNonTrouve("groupe", id);
+        }
+    }
+
+    private void adminGererComptes() {
+        List<String[]> abonnes = chargerAbonnes();
+        vue.afficherListeAbonnes(abonnes);
+        int choix = vue.afficherMenuGestionComptes();
+        if (choix == 1) {
+            int idAbonne = vue.demanderIdAbonne();
+            if (supprimerAbonne(idAbonne)) {
+                vue.afficherAbonneSupprime();
+            } else {
+                vue.afficherAbonneNonTrouve();
+            }
+        }
+    }
+
+    private List<String[]> chargerAbonnes() {
+        List<String[]> abonnes = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                if (parts.length >= 5) {
+                    // Exclure les admins (flag admin = "0" dans parts[5])
+                    if (parts.length >= 6 && parts[5].equals("0")) continue;
+                    abonnes.add(parts);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return abonnes;
+    }
+
+    private boolean supprimerAbonne(int idAbonne) {
+        List<String> lignes = new ArrayList<>();
+        boolean trouve = false;
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                if (Integer.parseInt(parts[0]) == idAbonne) {
+                    // Ne pas supprimer les admins
+                    if (parts.length >= 6 && parts[5].equals("0")) {
+                        lignes.add(ligne);
+                    } else {
+                        trouve = true;
+                    }
+                } else {
+                    lignes.add(ligne);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        if (!trouve) return false;
+        try (FileWriter fw = new FileWriter("monfichier.txt", false)) {
+            for (String l : lignes) fw.write(l + "\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return true;
+    }
+
+    private int compterUtilisateurs() {
+        int count = 0;
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (!ligne.trim().isEmpty()) count++;
+            }
+        } catch (IOException e) {
+            // pas de fichier
+        }
+        return count;
+    }
+
+    private void adminStatistiques() {
+        vue.afficherStatistiques(
+            Catalogue.getNombreMorceaux(),
+            Catalogue.getNombreAlbums(),
+            Catalogue.getNombreArtistes(),
+            Catalogue.getNombreGroupes(),
+            compterUtilisateurs(),
+            Historique.getNombreTotalEcoutes()
+        );
     }
 
     // ==================== MENU CLIENT ====================
 
     private void menuClient() {
-        int choixClient;
+        int choix;
         do {
-            choixClient = vue.afficherMenuClient();
+            choix = vue.afficherMenuClient();
+            switch (choix) {
+                case 1: menuCatalogue(); break;
+                case 2: menuPlaylist(); break;
+                case 3: ecouter(Integer.MAX_VALUE); break;
+                case 4: consulterHistorique(); break;
+                case 5: vue.afficherRetourMenuPrincipal(); break;
+                default: vue.afficherChoixInvalide();
+            }
+        } while (choix != 5);
+    }
 
-            switch (choixClient) {
-                case 1:
-                    menuPlaylist();
+    // ==================== MENU VISITEUR ====================
+
+    private void menuVisiteur() {
+        int choix;
+        do {
+            choix = vue.afficherMenuVisiteur();
+            switch (choix) {
+                case 1: menuCatalogue(); break;
+                case 2: ecouter(5); break;
+                case 3: break;
+                default: vue.afficherChoixInvalide();
+            }
+        } while (choix != 3);
+    }
+
+    // ==================== CATALOGUE : NAVIGATION ====================
+
+    private void menuCatalogue() {
+        int choix;
+        do {
+            choix = vue.afficherMenuCatalogue();
+            switch (choix) {
+                case 1: // recherche globale
+                    String recherche = vue.demanderRecherche();
+                    Catalogue.ResultatRecherche r = Catalogue.rechercherGlobal(recherche);
+                    vue.afficherResultatsRecherche(r);
+                    if (!r.estVide()) {
+                        naviguer();
+                    }
                     break;
-                case 2:
-                    ecouter(Integer.MAX_VALUE);
+                case 2: // tous les morceaux
+                    vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
+                    naviguer();
                     break;
-                case 3:
-                    consulterHistorique();
+                case 3: // tous les albums
+                    vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
+                    naviguer();
                     break;
-                case 4:
-                    vue.afficherRetourMenuPrincipal();
+                case 4: // tous les artistes
+                    vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
+                    naviguer();
+                    break;
+                case 5: // tous les groupes
+                    vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
+                    naviguer();
+                    break;
+                case 6: // par genre
+                    List<String> genres = Catalogue.getGenresDisponibles();
+                    vue.afficherGenresDisponibles(genres);
+                    int numGenre = vue.demanderIdElement();
+                    if (numGenre >= 1 && numGenre <= genres.size()) {
+                        List<Morceau> parGenre = Catalogue.getMorceauxParGenre(genres.get(numGenre - 1));
+                        vue.afficherListeMorceaux(parGenre);
+                        naviguer();
+                    } else {
+                        vue.afficherChoixInvalide();
+                    }
+                    break;
+                case 7: break;
+                default: vue.afficherChoixInvalide();
+            }
+        } while (choix != 7);
+    }
+
+    /**
+     * Boucle de navigation détaillée dans le catalogue.
+     * Permet de consulter les détails d'un morceau, album, artiste ou groupe par ID.
+     */
+    private void naviguer() {
+        boolean continuer = true;
+        while (continuer) {
+            int choixNav = vue.afficherMenuNavigation();
+            switch (choixNav) {
+                case 1: // détails morceau
+                    int idM = vue.demanderIdElement();
+                    Morceau morceau = Morceau.rechercherParId(idM);
+                    if (morceau != null) {
+                        vue.afficherDetailsMorceau(morceau);
+                        vue.afficherAlbumsDuMorceau(Catalogue.getAlbumsDepuisMorceau(idM));
+                        vue.afficherAutresMorceauxInterprete(Catalogue.getAutresMorceauxMemeInterprete(morceau));
+                    } else {
+                        vue.afficherErreurId();
+                    }
+                    break;
+                case 2: // détails album
+                    int idA = vue.demanderIdElement();
+                    Album album = Album.rechercherParId(idA);
+                    if (album != null) {
+                        vue.afficherDetailsAlbum(album);
+                        vue.afficherAutresAlbumsInterprete(Catalogue.getAutresAlbumsMemeInterprete(album));
+                    } else {
+                        vue.afficherErreurId();
+                    }
+                    break;
+                case 3: // détails artiste
+                    int idAr = vue.demanderIdElement();
+                    Artiste artiste = Artiste.rechercherParId(idAr);
+                    if (artiste != null) {
+                        vue.afficherDetailsArtiste(artiste);
+                        vue.afficherGroupesDeLArtiste(Catalogue.getGroupesDepuisArtiste(idAr));
+                        vue.afficherMorceauxArtiste(Catalogue.getMorceauxDepuisArtiste(idAr));
+                        vue.afficherAlbumsArtiste(Catalogue.getAlbumsDepuisArtiste(idAr));
+                    } else {
+                        vue.afficherErreurId();
+                    }
+                    break;
+                case 4: // détails groupe
+                    int idG = vue.demanderIdElement();
+                    Groupe groupe = Groupe.rechercherParId(idG);
+                    if (groupe != null) {
+                        vue.afficherDetailsGroupe(groupe);
+                        vue.afficherMorceauxGroupe(Catalogue.getMorceauxDepuisGroupe(idG));
+                        vue.afficherAlbumsGroupe(Catalogue.getAlbumsDepuisGroupe(idG));
+                    } else {
+                        vue.afficherErreurId();
+                    }
+                    break;
+                case 5:
+                    continuer = false;
                     break;
                 default:
                     vue.afficherChoixInvalide();
             }
-        } while (choixClient != 4);
+        }
     }
 
     // ==================== MENU PLAYLIST ====================
@@ -169,30 +446,17 @@ public class ControleurPrincipal {
         do {
             choix = vue.afficherMenuPlaylist();
             switch (choix) {
-                case 1:
-                    creerPlaylist();
-                    break;
-                case 2:
-                    voirPlaylists();
-                    break;
-                case 3:
-                    ajouterMusiquePlaylist();
-                    break;
-                case 4:
-                    retirerMusiquePlaylist();
-                    break;
-                case 5:
-                    ecouterPlaylist();
-                    break;
-                case 6:
-                    supprimerPlaylist();
-                    break;
-                case 7:
-                    break;
-                default:
-                    vue.afficherChoixInvalide();
+                case 1: creerPlaylist(); break;
+                case 2: voirPlaylists(); break;
+                case 3: ajouterMorceauPlaylist(); break;
+                case 4: retirerMorceauPlaylist(); break;
+                case 5: ecouterPlaylist(); break;
+                case 6: renommerPlaylist(); break;
+                case 7: supprimerPlaylist(); break;
+                case 8: break;
+                default: vue.afficherChoixInvalide();
             }
-        } while (choix != 7);
+        } while (choix != 8);
     }
 
     private void creerPlaylist() {
@@ -209,7 +473,7 @@ public class ControleurPrincipal {
         }
     }
 
-    private void ajouterMusiquePlaylist() {
+    private void ajouterMorceauPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
         if (playlists.isEmpty()) return;
@@ -221,24 +485,24 @@ public class ControleurPrincipal {
             return;
         }
 
-        // Rechercher la musique par titre/artiste pour afficher l'ID
+        // Rechercher le morceau
         String recherche = vue.demanderRechercheMusique();
-        Musique m = Musique.rechercher(recherche);
-        if (m == null) {
-            vue.afficherAucuneMusiqueTrouvee();
-            return;
-        }
-        vue.afficherMusique(m);
+        List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
+        vue.afficherResultatsEcoute(resultats);
+        if (resultats.isEmpty()) return;
 
-        boolean ok = Playlist.ajouterMusique(idPlaylist, m.getId());
+        int idMorceau = vue.demanderIdMorceau();
+        boolean ok = Playlist.ajouterMorceau(idPlaylist, idMorceau);
         if (ok) {
-            vue.afficherMusiqueAjouteePlaylist(m.getTitre(), cible.getNom());
+            Morceau m = Morceau.rechercherParId(idMorceau);
+            String titre = (m != null) ? m.getTitre() : "?";
+            vue.afficherMorceauAjoutePlaylist(titre, cible.getNom());
         } else {
-            vue.afficherMusiqueDejaPresente();
+            vue.afficherMorceauDejaPresent();
         }
     }
 
-    private void retirerMusiquePlaylist() {
+    private void retirerMorceauPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
         if (playlists.isEmpty()) return;
@@ -251,12 +515,33 @@ public class ControleurPrincipal {
         }
         vue.afficherContenuPlaylist(cible);
 
-        int idMusique = vue.demanderIdMusique();
-        boolean ok = Playlist.retirerMusique(idPlaylist, idMusique);
+        int idMorceau = vue.demanderIdMorceau();
+        boolean ok = Playlist.retirerMorceau(idPlaylist, idMorceau);
         if (ok) {
-            vue.afficherMusiqueRetirée();
+            vue.afficherMorceauRetire();
         } else {
             vue.afficherErreurId();
+        }
+    }
+
+    private void renommerPlaylist() {
+        List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlists);
+        if (playlists.isEmpty()) return;
+
+        int idPlaylist = vue.demanderIdPlaylist();
+        Playlist cible = trouverPlaylist(playlists, idPlaylist);
+        if (cible == null) {
+            vue.afficherPlaylistIntrouvable();
+            return;
+        }
+
+        String nouveauNom = vue.demanderNouveauNomPlaylist();
+        boolean ok = Playlist.renommer(idPlaylist, utilisateur.getID(), nouveauNom);
+        if (ok) {
+            vue.afficherPlaylistRenommee(cible.getNom(), nouveauNom);
+        } else {
+            vue.afficherPlaylistIntrouvable();
         }
     }
 
@@ -272,8 +557,8 @@ public class ControleurPrincipal {
             return;
         }
 
-        List<Musique> musiques = cible.getMusiques();
-        if (musiques.isEmpty()) {
+        List<Morceau> morceaux = cible.getMorceaux();
+        if (morceaux.isEmpty()) {
             vue.afficherPlaylistVide();
             return;
         }
@@ -281,28 +566,21 @@ public class ControleurPrincipal {
         vue.afficherLecturePlaylist(cible.getNom());
 
         int index = 0;
-        while (index < musiques.size()) {
-            Musique m = musiques.get(index);
-            vue.afficherPochette(index + 1, musiques.size(), m);
-            vue.afficherEcoute();
+        while (index < morceaux.size()) {
+            Morceau m = morceaux.get(index);
+            vue.afficherPochette(index + 1, morceaux.size(), m);
+            vue.afficherEcoute(m);
 
-            // Enregistrement dans l'historique
             Historique.enregistrerEcoute(utilisateur.getID(), m);
 
-            // Contrôles après chaque morceau
-            int action = vue.afficherControlesLecteur(index > 0, index < musiques.size() - 1);
+            int action = vue.afficherControlesLecteur(index > 0, index < morceaux.size() - 1);
             switch (action) {
-                case 1: // morceau précédent
-                    index--;
-                    break;
-                case 2: // morceau suivant
-                    index++;
-                    break;
-                case 3: // arrêter la playlist
+                case 1: index--; break;
+                case 2: index++; break;
+                case 3:
                     vue.afficherFinPlaylist(cible.getNom());
                     return;
-                default:
-                    index++;
+                default: index++;
             }
         }
 
@@ -335,12 +613,6 @@ public class ControleurPrincipal {
         return null;
     }
 
-    // ==================== VISITEUR ====================
-
-    private void menuVisiteur() {
-        ecouter(5);
-    }
-
     // ==================== ECOUTE ====================
 
     private void ecouter(int maxEcoutes) {
@@ -351,39 +623,37 @@ public class ControleurPrincipal {
         while (!quitter && compteur < maxEcoutes) {
             String recherche = vue.demanderRechercheMusique();
             if (recherche.equalsIgnoreCase("stop") || recherche.equalsIgnoreCase("quitter")) {
-                quitter = true;
                 break;
             }
 
-            Musique m = Musique.rechercher(recherche);
-            if (m == null) {
-                vue.afficherAucuneMusiqueTrouvee();
-                // on retourne au sous-menu sans décompter
+            List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
+            if (resultats.isEmpty()) {
+                vue.afficherMessage("Aucun morceau trouve.");
                 int suite = vue.afficherMenuApresEchecRecherche();
                 if (suite == 2) quitter = true;
                 continue;
             }
 
-            // Lecture du morceau
-            vue.afficherMusique(m);
-            vue.afficherEcoute();
+            vue.afficherResultatsEcoute(resultats);
+            int idChoisi = vue.demanderIdMorceauEcoute();
+            Morceau m = Morceau.rechercherParId(idChoisi);
+            if (m == null) {
+                vue.afficherErreurId();
+                continue;
+            }
+
+            vue.afficherEcoute(m);
             compteur++;
 
-            // Enregistrement historique (abonné uniquement)
             if (estAbonne) {
                 Historique.enregistrerEcoute(utilisateur.getID(), m);
             }
 
-            // Sous-menu après écoute
             int choixSuite = vue.afficherMenuApresEcoute(estAbonne ? -1 : maxEcoutes - compteur);
             switch (choixSuite) {
-                case 1: // écouter un autre morceau → on reboucle
-                    break;
-                case 2: // retour au menu précédent
-                    quitter = true;
-                    break;
-                default:
-                    vue.afficherChoixInvalide();
+                case 1: break; // écouter un autre morceau
+                case 2: quitter = true; break;
+                default: vue.afficherChoixInvalide();
             }
         }
 

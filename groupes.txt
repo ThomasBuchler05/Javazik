@@ -1,0 +1,3 @@
+1;Queen;1970;Britannique
+2;Nirvana;1987;Americain
+3;Eagles;1971;Americain
