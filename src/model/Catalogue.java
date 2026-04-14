@@ -113,6 +113,7 @@ public class Catalogue {
 
     // ==================== NAVIGATION : DEPUIS UN GROUPE ====================
 
+
     /**
      * A partir d'un groupe, retourne ses morceaux.
      */
@@ -189,6 +190,12 @@ public class Catalogue {
         public List<Album> albums = new ArrayList<>();
         public List<Artiste> artistes = new ArrayList<>();
         public List<Groupe> groupes = new ArrayList<>();
+
+        // ← ajouter ici
+        public List<Morceau> getMorceaux()  { return morceaux; }
+        public List<Album>   getAlbums()    { return albums; }
+        public List<Artiste> getArtistes()  { return artistes; }
+        public List<Groupe>  getGroupes()   { return groupes; }
 
         public boolean estVide() {
             return morceaux.isEmpty() && albums.isEmpty()

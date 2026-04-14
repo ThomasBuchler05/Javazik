@@ -1,6 +1,7 @@
 package controller;
 
 import model.*;
+import view.VueGraphique;
 import view.VueConsole;
 
 import java.io.*;
@@ -15,8 +16,12 @@ public class ControleurPrincipal {
     private VueConsole vue;
     private Utilisateur utilisateur;
 
-    public ControleurPrincipal() {
-        this.vue = new VueConsole();
+    public ControleurPrincipal(boolean graphique) {
+        if (graphique) {
+            this.vue = new VueGraphique();
+        } else {
+            this.vue = new VueConsole();
+        }
         this.utilisateur = new Client();
     }
 
@@ -127,7 +132,6 @@ public class ControleurPrincipal {
     }
 
     private void adminAjouterMorceau() {
-        // Afficher artistes et groupes disponibles pour aider
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
 
@@ -212,7 +216,6 @@ public class ControleurPrincipal {
     // ==================== ADMIN : ASSOCIATION MORCEAU <-> ALBUM ====================
 
     private void adminAjouterMorceauDansAlbum() {
-        // Afficher les albums disponibles
         List<Album> albums = Catalogue.getTousLesAlbums();
         vue.afficherListeAlbums(albums);
         if (albums.isEmpty()) {
@@ -227,10 +230,7 @@ public class ControleurPrincipal {
             return;
         }
 
-        // Afficher le contenu actuel de l'album
         vue.afficherDetailsAlbum(album);
-
-        // Afficher les morceaux disponibles
         vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
 
         int idMorceau = vue.demanderIdMorceauAssociation();
@@ -240,7 +240,6 @@ public class ControleurPrincipal {
             return;
         }
 
-        // Vérifier que le morceau n'est pas déjà dans l'album
         for (Morceau m : album.getMorceaux()) {
             if (m.getId() == idMorceau) {
                 vue.afficherMessage("Ce morceau est deja dans cet album.");
@@ -259,7 +258,6 @@ public class ControleurPrincipal {
     // ==================== ADMIN : ASSOCIATION ARTISTE <-> GROUPE ====================
 
     private void adminAjouterMembreGroupe() {
-        // Afficher les groupes disponibles
         List<Groupe> groupes = Catalogue.getTousLesGroupes();
         vue.afficherListeGroupes(groupes);
         if (groupes.isEmpty()) {
@@ -274,10 +272,7 @@ public class ControleurPrincipal {
             return;
         }
 
-        // Afficher les membres actuels
         vue.afficherDetailsGroupe(groupe);
-
-        // Afficher les artistes disponibles
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
 
         int idArtiste = vue.demanderIdArtisteAssociation();
@@ -305,20 +300,6 @@ public class ControleurPrincipal {
             } else {
                 vue.afficherAbonneNonTrouve();
             }
-        } else if (choix == 2) {
-            int idAbonne = vue.demanderIdAbonne();
-            if (Utilisateur.suspendreCompte(idAbonne)) {
-                vue.afficherAbonneSuspendu();
-            } else {
-                vue.afficherAbonneNonTrouveOuDejaEtat("suspendu");
-            }
-        } else if (choix == 3) {
-            int idAbonne = vue.demanderIdAbonne();
-            if (Utilisateur.reactiverCompte(idAbonne)) {
-                vue.afficherAbonneReactive();
-            } else {
-                vue.afficherAbonneNonTrouveOuDejaEtat("actif");
-            }
         }
     }
 
@@ -330,7 +311,6 @@ public class ControleurPrincipal {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
                 if (parts.length >= 5) {
-                    // Exclure les admins (flag admin = "0" dans parts[5])
                     if (parts.length >= 6 && parts[5].equals("0")) continue;
                     abonnes.add(parts);
                 }
@@ -350,7 +330,6 @@ public class ControleurPrincipal {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
                 if (Integer.parseInt(parts[0]) == idAbonne) {
-                    // Ne pas supprimer les admins
                     if (parts.length >= 6 && parts[5].equals("0")) {
                         lignes.add(ligne);
                     } else {
@@ -436,37 +415,34 @@ public class ControleurPrincipal {
         do {
             choix = vue.afficherMenuCatalogue();
             switch (choix) {
-                case 1: // recherche globale
+                case 1:
                     String recherche = vue.demanderRecherche();
                     Catalogue.ResultatRecherche r = Catalogue.rechercherGlobal(recherche);
                     vue.afficherResultatsRecherche(r);
-                    if (!r.estVide()) {
-                        naviguer();
-                    }
+                    if (!r.estVide()) { naviguer(); }
                     break;
-                case 2: // tous les morceaux
+                case 2:
                     vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
                     naviguer();
                     break;
-                case 3: // tous les albums
+                case 3:
                     vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
                     naviguer();
                     break;
-                case 4: // tous les artistes
+                case 4:
                     vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
                     naviguer();
                     break;
-                case 5: // tous les groupes
+                case 5:
                     vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
                     naviguer();
                     break;
-                case 6: // par genre
+                case 6:
                     List<String> genres = Catalogue.getGenresDisponibles();
                     vue.afficherGenresDisponibles(genres);
                     int numGenre = vue.demanderIdElement();
                     if (numGenre >= 1 && numGenre <= genres.size()) {
-                        List<Morceau> parGenre = Catalogue.getMorceauxParGenre(genres.get(numGenre - 1));
-                        vue.afficherListeMorceaux(parGenre);
+                        vue.afficherListeMorceaux(Catalogue.getMorceauxParGenre(genres.get(numGenre - 1)));
                         naviguer();
                     } else {
                         vue.afficherChoixInvalide();
@@ -478,41 +454,29 @@ public class ControleurPrincipal {
         } while (choix != 7);
     }
 
-    /**
-     * Boucle de navigation détaillée dans le catalogue.
-     * Permet de consulter les détails d'un morceau, album, artiste ou groupe par ID.
-     */
     private void naviguer() {
         boolean continuer = true;
         while (continuer) {
             int choixNav = vue.afficherMenuNavigation();
             switch (choixNav) {
-                case 1: // détails morceau
+                case 1:
                     int idM = vue.demanderIdElement();
                     Morceau morceau = Morceau.rechercherParId(idM);
                     if (morceau != null) {
                         vue.afficherDetailsMorceau(morceau);
                         vue.afficherAlbumsDuMorceau(Catalogue.getAlbumsDepuisMorceau(idM));
                         vue.afficherAutresMorceauxInterprete(Catalogue.getAutresMorceauxMemeInterprete(morceau));
-                        // Afficher la note moyenne
-                        double moyenne = Morceau.getNoteMoyenne(idM);
-                        int nbVotes = Morceau.getNombreVotes(idM);
-                        vue.afficherNoteMorceau(moyenne, nbVotes);
-                    } else {
-                        vue.afficherErreurId();
-                    }
+                    } else { vue.afficherErreurId(); }
                     break;
-                case 2: // détails album
+                case 2:
                     int idA = vue.demanderIdElement();
                     Album album = Album.rechercherParId(idA);
                     if (album != null) {
                         vue.afficherDetailsAlbum(album);
                         vue.afficherAutresAlbumsInterprete(Catalogue.getAutresAlbumsMemeInterprete(album));
-                    } else {
-                        vue.afficherErreurId();
-                    }
+                    } else { vue.afficherErreurId(); }
                     break;
-                case 3: // détails artiste
+                case 3:
                     int idAr = vue.demanderIdElement();
                     Artiste artiste = Artiste.rechercherParId(idAr);
                     if (artiste != null) {
@@ -520,20 +484,16 @@ public class ControleurPrincipal {
                         vue.afficherGroupesDeLArtiste(Catalogue.getGroupesDepuisArtiste(idAr));
                         vue.afficherMorceauxArtiste(Catalogue.getMorceauxDepuisArtiste(idAr));
                         vue.afficherAlbumsArtiste(Catalogue.getAlbumsDepuisArtiste(idAr));
-                    } else {
-                        vue.afficherErreurId();
-                    }
+                    } else { vue.afficherErreurId(); }
                     break;
-                case 4: // détails groupe
+                case 4:
                     int idG = vue.demanderIdElement();
                     Groupe groupe = Groupe.rechercherParId(idG);
                     if (groupe != null) {
                         vue.afficherDetailsGroupe(groupe);
                         vue.afficherMorceauxGroupe(Catalogue.getMorceauxDepuisGroupe(idG));
                         vue.afficherAlbumsGroupe(Catalogue.getAlbumsDepuisGroupe(idG));
-                    } else {
-                        vue.afficherErreurId();
-                    }
+                    } else { vue.afficherErreurId(); }
                     break;
                 case 5:
                     continuer = false;
@@ -585,12 +545,8 @@ public class ControleurPrincipal {
 
         int idPlaylist = vue.demanderIdPlaylist();
         Playlist cible = trouverPlaylist(playlists, idPlaylist);
-        if (cible == null) {
-            vue.afficherPlaylistIntrouvable();
-            return;
-        }
+        if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
 
-        // Rechercher le morceau
         String recherche = vue.demanderRechercheMusique();
         List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
         vue.afficherResultatsEcoute(resultats);
@@ -600,8 +556,7 @@ public class ControleurPrincipal {
         boolean ok = Playlist.ajouterMorceau(idPlaylist, idMorceau);
         if (ok) {
             Morceau m = Morceau.rechercherParId(idMorceau);
-            String titre = (m != null) ? m.getTitre() : "?";
-            vue.afficherMorceauAjoutePlaylist(titre, cible.getNom());
+            vue.afficherMorceauAjoutePlaylist(m != null ? m.getTitre() : "?", cible.getNom());
         } else {
             vue.afficherMorceauDejaPresent();
         }
@@ -614,15 +569,11 @@ public class ControleurPrincipal {
 
         int idPlaylist = vue.demanderIdPlaylist();
         Playlist cible = trouverPlaylist(playlists, idPlaylist);
-        if (cible == null) {
-            vue.afficherPlaylistIntrouvable();
-            return;
-        }
+        if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
         vue.afficherContenuPlaylist(cible);
 
         int idMorceau = vue.demanderIdMorceau();
-        boolean ok = Playlist.retirerMorceau(idPlaylist, idMorceau);
-        if (ok) {
+        if (Playlist.retirerMorceau(idPlaylist, idMorceau)) {
             vue.afficherMorceauRetire();
         } else {
             vue.afficherErreurId();
@@ -636,14 +587,10 @@ public class ControleurPrincipal {
 
         int idPlaylist = vue.demanderIdPlaylist();
         Playlist cible = trouverPlaylist(playlists, idPlaylist);
-        if (cible == null) {
-            vue.afficherPlaylistIntrouvable();
-            return;
-        }
+        if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
 
         String nouveauNom = vue.demanderNouveauNomPlaylist();
-        boolean ok = Playlist.renommer(idPlaylist, utilisateur.getID(), nouveauNom);
-        if (ok) {
+        if (Playlist.renommer(idPlaylist, utilisateur.getID(), nouveauNom)) {
             vue.afficherPlaylistRenommee(cible.getNom(), nouveauNom);
         } else {
             vue.afficherPlaylistIntrouvable();
@@ -657,50 +604,26 @@ public class ControleurPrincipal {
 
         int idPlaylist = vue.demanderIdPlaylist();
         Playlist cible = trouverPlaylist(playlists, idPlaylist);
-        if (cible == null) {
-            vue.afficherPlaylistIntrouvable();
-            return;
-        }
+        if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
 
         List<Morceau> morceaux = cible.getMorceaux();
-        if (morceaux.isEmpty()) {
-            vue.afficherPlaylistVide();
-            return;
-        }
+        if (morceaux.isEmpty()) { vue.afficherPlaylistVide(); return; }
 
         vue.afficherLecturePlaylist(cible.getNom());
-
         int index = 0;
         while (index < morceaux.size()) {
             Morceau m = morceaux.get(index);
             vue.afficherPochette(index + 1, morceaux.size(), m);
             vue.afficherEcoute(m);
-
             Historique.enregistrerEcoute(utilisateur.getID(), m);
-
-            // Proposer de noter le morceau après écoute dans la playlist
-            int noteExistante = Morceau.getNoteClient(m.getId(), utilisateur.getID());
-            int choixNote = vue.proposerNotation(noteExistante);
-            if (choixNote == 1) {
-                int note = vue.demanderNote();
-                if (Morceau.noterMorceau(m.getId(), utilisateur.getID(), note)) {
-                    vue.afficherNoteEnregistree(note);
-                } else {
-                    vue.afficherMessage("Note invalide (doit etre entre 1 et 5).");
-                }
-            }
-
             int action = vue.afficherControlesLecteur(index > 0, index < morceaux.size() - 1);
             switch (action) {
                 case 1: index--; break;
                 case 2: index++; break;
-                case 3:
-                    vue.afficherFinPlaylist(cible.getNom());
-                    return;
+                case 3: vue.afficherFinPlaylist(cible.getNom()); return;
                 default: index++;
             }
         }
-
         vue.afficherFinPlaylist(cible.getNom());
     }
 
@@ -711,12 +634,9 @@ public class ControleurPrincipal {
 
         int idPlaylist = vue.demanderIdPlaylist();
         Playlist cible = trouverPlaylist(playlists, idPlaylist);
-        if (cible == null) {
-            vue.afficherPlaylistIntrouvable();
-            return;
-        }
-        boolean ok = Playlist.supprimer(idPlaylist, utilisateur.getID());
-        if (ok) {
+        if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
+
+        if (Playlist.supprimer(idPlaylist, utilisateur.getID())) {
             vue.afficherPlaylistSupprimee(cible.getNom());
         } else {
             vue.afficherPlaylistIntrouvable();
@@ -739,9 +659,7 @@ public class ControleurPrincipal {
 
         while (!quitter && compteur < maxEcoutes) {
             String recherche = vue.demanderRechercheMusique();
-            if (recherche.equalsIgnoreCase("stop") || recherche.equalsIgnoreCase("quitter")) {
-                break;
-            }
+            if (recherche.equalsIgnoreCase("stop") || recherche.equalsIgnoreCase("quitter")) break;
 
             List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
             if (resultats.isEmpty()) {
@@ -754,35 +672,14 @@ public class ControleurPrincipal {
             vue.afficherResultatsEcoute(resultats);
             int idChoisi = vue.demanderIdMorceauEcoute();
             Morceau m = Morceau.rechercherParId(idChoisi);
-            if (m == null) {
-                vue.afficherErreurId();
-                continue;
-            }
+            if (m == null) { vue.afficherErreurId(); continue; }
 
             vue.afficherEcoute(m);
             compteur++;
-
-            if (estAbonne) {
-                Historique.enregistrerEcoute(utilisateur.getID(), m);
-                // Proposer de noter le morceau après écoute
-                int noteExistante = Morceau.getNoteClient(m.getId(), utilisateur.getID());
-                int choixNote = vue.proposerNotation(noteExistante);
-                if (choixNote == 1) {
-                    int note = vue.demanderNote();
-                    if (Morceau.noterMorceau(m.getId(), utilisateur.getID(), note)) {
-                        vue.afficherNoteEnregistree(note);
-                    } else {
-                        vue.afficherMessage("Note invalide (doit etre entre 1 et 5).");
-                    }
-                }
-            }
+            if (estAbonne) Historique.enregistrerEcoute(utilisateur.getID(), m);
 
             int choixSuite = vue.afficherMenuApresEcoute(estAbonne ? -1 : maxEcoutes - compteur);
-            switch (choixSuite) {
-                case 1: break; // écouter un autre morceau
-                case 2: quitter = true; break;
-                default: vue.afficherChoixInvalide();
-            }
+            if (choixSuite == 2) quitter = true;
         }
 
         if (compteur >= maxEcoutes && !estAbonne) {
