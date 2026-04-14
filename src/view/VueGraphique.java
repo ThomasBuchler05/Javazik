@@ -3,6 +3,7 @@ package view;
 import model.*;
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,8 +40,13 @@ public class VueGraphique extends VueConsole {
         champSaisie.setBackground(new Color(50, 50, 50));
         champSaisie.setForeground(Color.WHITE);
         champSaisie.setCaretColor(Color.WHITE);
+        JLabel labelPrompt = new JLabel("  > ");
+        labelPrompt.setForeground(new Color(100, 200, 100));
+        labelPrompt.setFont(new Font("Monospaced", Font.BOLD, 13));
         JPanel panneauBas = new JPanel(new BorderLayout());
-        panneauBas.add(new JLabel("  > "), BorderLayout.WEST);
+        panneauBas.setBackground(new Color(40, 40, 40));
+        panneauBas.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(80, 80, 80)));
+        panneauBas.add(labelPrompt, BorderLayout.WEST);
         panneauBas.add(champSaisie, BorderLayout.CENTER);
         fenetre.add(panneauBas, BorderLayout.SOUTH);
 
@@ -95,24 +101,33 @@ public class VueGraphique extends VueConsole {
         }
     }
 
+    /**
+     * Affiche une boîte de dialogue modale avec des boutons numérotés.
+     * Doit être appelable depuis n'importe quel thread : utilise invokeAndWait
+     * pour garantir que la création et l'affichage se font sur l'EDT.
+     */
     private int afficherMenuBoutons(String titre, String... options) {
-        JDialog dialog = new JDialog(fenetre, titre, true);
-        dialog.setLayout(new GridLayout(options.length, 1, 5, 5));
-        dialog.setSize(350, 50 + options.length * 45);
-        dialog.setLocationRelativeTo(fenetre);
-
         final int[] choix = {-1};
-        for (int i = 0; i < options.length; i++) {
-            final int num = i + 1;
-            JButton btn = new JButton(num + ". " + options[i]);
-            btn.setFont(new Font("SansSerif", Font.PLAIN, 13));
-            btn.addActionListener(e -> {
-                choix[0] = num;
-                dialog.dispose();
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JDialog dialog = new JDialog(fenetre, titre, true);
+                dialog.setLayout(new GridLayout(options.length, 1, 5, 5));
+                dialog.setSize(350, 50 + options.length * 45);
+                dialog.setLocationRelativeTo(fenetre);
+
+                for (int i = 0; i < options.length; i++) {
+                    final int num = i + 1;
+                    JButton btn = new JButton(num + ". " + options[i]);
+                    btn.setFont(new Font("SansSerif", Font.PLAIN, 13));
+                    btn.addActionListener(e -> {
+                        choix[0] = num;
+                        dialog.dispose();
+                    });
+                    dialog.add(btn);
+                }
+                dialog.setVisible(true); // boucle d'événements imbriquée jusqu'à dispose()
             });
-            dialog.add(btn);
-        }
-        dialog.setVisible(true);
+        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
         return choix[0];
     }
 
@@ -207,8 +222,14 @@ public class VueGraphique extends VueConsole {
 
     @Override
     public String demanderMdp() {
-        String mdp = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Connexion", JOptionPane.QUESTION_MESSAGE);
-        return mdp != null ? mdp : "";
+        final String[] mdp = {""};
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                String saisie = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Connexion", JOptionPane.QUESTION_MESSAGE);
+                mdp[0] = saisie != null ? saisie : "";
+            });
+        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
+        return mdp[0];
     }
 
     @Override
@@ -236,8 +257,14 @@ public class VueGraphique extends VueConsole {
 
     @Override
     public String demanderMotDePasse() {
-        String mdp = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Inscription", JOptionPane.QUESTION_MESSAGE);
-        return mdp != null ? mdp : "";
+        final String[] mdp = {""};
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                String saisie = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Inscription", JOptionPane.QUESTION_MESSAGE);
+                mdp[0] = saisie != null ? saisie : "";
+            });
+        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
+        return mdp[0];
     }
 
     @Override
@@ -495,13 +522,23 @@ public class VueGraphique extends VueConsole {
     public void afficherListeAbonnes(List<String[]> abonnes) {
         afficher("\n--- Abonnés ---");
         if (abonnes.isEmpty()) { afficher("Aucun abonné."); return; }
-        for (String[] a : abonnes)
-            afficher("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4]);
+        for (String[] a : abonnes) {
+            boolean suspendu = false;
+            for (String part : a) {
+                if (part.equals("SUSPENDU")) { suspendu = true; break; }
+            }
+            String statut = suspendu ? " [SUSPENDU]" : " [ACTIF]";
+            afficher("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4] + statut);
+        }
     }
 
     @Override
     public int afficherMenuGestionComptes() {
-        return afficherMenuBoutons("Gestion comptes", "Supprimer un compte abonné", "Retour");
+        return afficherMenuBoutons("Gestion comptes",
+                "Supprimer un compte abonné",
+                "Suspendre un compte abonné",
+                "Réactiver un compte abonné",
+                "Retour");
     }
 
     @Override
@@ -510,6 +547,14 @@ public class VueGraphique extends VueConsole {
     public void afficherAbonneSupprime() { afficher("✅ Compte supprimé."); }
     @Override
     public void afficherAbonneNonTrouve() { afficher("❌ Abonné introuvable."); }
+    @Override
+    public void afficherAbonneSuspendu() { afficher("✅ Compte suspendu."); }
+    @Override
+    public void afficherAbonneReactive() { afficher("✅ Compte réactivé."); }
+    @Override
+    public void afficherAbonneNonTrouveOuDejaEtat(String etat) {
+        afficher("❌ Abonné introuvable ou déjà " + etat + ".");
+    }
 
     // ==================== STATISTIQUES ====================
 
@@ -555,10 +600,106 @@ public class VueGraphique extends VueConsole {
         afficher("\n⚠ Limite d'écoutes atteinte. Créez un compte pour continuer !");
     }
 
+    /**
+     * Simule la lecture d'un morceau avec une barre de progression animée.
+     * La durée de simulation est proportionnelle à la durée réelle (entre 2 et 5 secondes).
+     * Utilise invokeAndWait pour créer et afficher le dialogue sur l'EDT.
+     */
     @Override
     public void afficherEcoute(Morceau m) {
-        afficher("\n  ♪ Lecture : " + m.getTitre() + " - " + m.getNomInterprete());
-        afficher("  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ (" + m.getDureeFormatee() + ")");
+        afficher("\n  ♪ Lecture : " + m.getTitre() + " — " + m.getNomInterprete()
+                + "  (" + m.getDureeFormatee() + ")");
+
+        // Durée simulée proportionnelle à la durée réelle, plafonnée entre 2s et 5s
+        int dureeReelle = m.getDuree();
+        int dureeSimuleeMs = Math.max(2000, Math.min(5000, dureeReelle * 50));
+        int delaiParTick = Math.max(20, dureeSimuleeMs / 100);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JDialog dialog = new JDialog(fenetre, "♪ Lecture en cours", true);
+                dialog.setLayout(new BorderLayout(10, 10));
+                dialog.setSize(420, 130);
+                dialog.setLocationRelativeTo(fenetre);
+                dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+                dialog.getContentPane().setBackground(new Color(40, 40, 40));
+
+                // Titre et interprète du morceau
+                JLabel labelInfo = new JLabel(
+                        "  " + m.getTitre() + "  —  " + m.getNomInterprete(), SwingConstants.CENTER);
+                labelInfo.setForeground(new Color(200, 230, 200));
+                labelInfo.setFont(new Font("Monospaced", Font.BOLD, 12));
+                dialog.add(labelInfo, BorderLayout.NORTH);
+
+                // Barre de progression
+                JProgressBar barre = new JProgressBar(0, 100);
+                barre.setStringPainted(true);
+                barre.setForeground(new Color(100, 200, 100));
+                barre.setBackground(new Color(50, 50, 50));
+                barre.setFont(new Font("Monospaced", Font.PLAIN, 11));
+                JPanel panneauBarre = new JPanel(new BorderLayout());
+                panneauBarre.setBackground(new Color(40, 40, 40));
+                panneauBarre.setBorder(BorderFactory.createEmptyBorder(5, 15, 10, 15));
+                panneauBarre.add(barre, BorderLayout.CENTER);
+                dialog.add(panneauBarre, BorderLayout.CENTER);
+
+                // Timer : 100 ticks, chacun espacé de delaiParTick millisecondes
+                final int[] avancement = {0};
+                Timer timer = new Timer(delaiParTick, null);
+                timer.addActionListener(e -> {
+                    avancement[0]++;
+                    barre.setValue(avancement[0]);
+                    if (avancement[0] >= 100) {
+                        timer.stop();
+                        dialog.dispose();
+                    }
+                });
+                timer.start();
+                dialog.setVisible(true); // boucle imbriquée sur l'EDT jusqu'à dispose()
+            });
+        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
+    }
+
+    // ==================== NOTES ====================
+
+    @Override
+    public void afficherNoteMorceau(double moyenne, int nbVotes) {
+        if (nbVotes == 0) {
+            afficher("  Note : Aucune note pour l'instant.");
+        } else {
+            StringBuilder etoiles = new StringBuilder();
+            int pleines = (int) Math.round(moyenne);
+            for (int i = 1; i <= 5; i++) etoiles.append(i <= pleines ? "★" : "☆");
+            afficher(String.format("  Note : %s  %.1f/5 (%d vote%s)",
+                    etoiles, moyenne, nbVotes, nbVotes > 1 ? "s" : ""));
+        }
+    }
+
+    @Override
+    public int proposerNotation(int noteActuelle) {
+        if (noteActuelle > 0) {
+            return afficherMenuBoutons("Notation",
+                    "Modifier ma note (" + noteActuelle + "/5)", "Passer");
+        } else {
+            return afficherMenuBoutons("Notation", "Noter ce morceau (1 à 5)", "Passer");
+        }
+    }
+
+    @Override
+    public int demanderNote() {
+        afficher("Votre note (1 à 5) :");
+        while (true) {
+            int note = lireEntier();
+            if (note >= 1 && note <= 5) return note;
+            afficher("⚠ Note invalide, entrez un chiffre entre 1 et 5.");
+        }
+    }
+
+    @Override
+    public void afficherNoteEnregistree(int note) {
+        StringBuilder etoiles = new StringBuilder();
+        for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "★" : "☆");
+        afficher("  Note enregistrée : " + etoiles + " (" + note + "/5)");
     }
 
     // ==================== PLAYLISTS ====================
@@ -627,16 +768,22 @@ public class VueGraphique extends VueConsole {
                 + " | " + m.getGenre() + " | " + m.getDureeFormatee());
     }
 
+    /**
+     * Affiche les contrôles du lecteur de playlist.
+     * Construit dynamiquement la liste des boutons visibles et retourne le code
+     * correspondant attendu par le contrôleur : 1=Précédent, 2=Suivant, 3=Arrêter.
+     */
     @Override
     public int afficherControlesLecteur(boolean peutReculer, boolean peutAvancer) {
-        String[] opts = peutReculer && peutAvancer
-                ? new String[]{"◀ Précédent", "▶ Suivant", "⏹ Arrêter"}
-                : peutAvancer
-                ? new String[]{"▶ Suivant", "⏹ Arrêter"}
-                : new String[]{"⏹ Arrêter"};
-        int c = afficherMenuBoutons("Lecteur", opts);
-        if (!peutReculer) c++; // décalage si pas de "précédent"
-        return c;
+        List<String> opts  = new ArrayList<>();
+        List<Integer> codes = new ArrayList<>();
+
+        if (peutReculer) { opts.add("◀ Précédent"); codes.add(1); }
+        if (peutAvancer) { opts.add("▶ Suivant");   codes.add(2); }
+        opts.add("⏹ Arrêter");                       codes.add(3);
+
+        int idx = afficherMenuBoutons("Lecteur", opts.toArray(new String[0]));
+        return codes.get(idx - 1);
     }
 
     // ==================== HISTORIQUE ====================
