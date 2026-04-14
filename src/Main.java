@@ -20,10 +20,11 @@ public class Main {
         boolean graphique = (choix == 0);
 
         if (graphique) {
-            // Lance l'interface graphique sur le thread Swing
+            // Crée la fenêtre sur l'EDT, puis lance la logique sur un thread séparé
+            // pour ne pas bloquer l'EDT pendant les saisies utilisateur
             javax.swing.SwingUtilities.invokeLater(() -> {
                 ControleurPrincipal controleur = new ControleurPrincipal(true);
-                controleur.lancer();
+                new Thread(controleur::lancer).start();
             });
         } else {
             ControleurPrincipal controleur = new ControleurPrincipal(false);
