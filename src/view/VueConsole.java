@@ -60,13 +60,15 @@ public class VueConsole {
         System.out.println("2. Supprimer un morceau");
         System.out.println("3. Ajouter un album");
         System.out.println("4. Supprimer un album");
-        System.out.println("5. Ajouter un artiste");
-        System.out.println("6. Supprimer un artiste");
-        System.out.println("7. Ajouter un groupe");
-        System.out.println("8. Supprimer un groupe");
-        System.out.println("9. Gerer les comptes abonnes");
-        System.out.println("10. Consulter les statistiques");
-        System.out.println("11. Retour au menu principal");
+        System.out.println("5. Ajouter un morceau dans un album");
+        System.out.println("6. Ajouter un artiste");
+        System.out.println("7. Supprimer un artiste");
+        System.out.println("8. Ajouter un groupe");
+        System.out.println("9. Supprimer un groupe");
+        System.out.println("10. Ajouter un membre a un groupe");
+        System.out.println("11. Gerer les comptes abonnes");
+        System.out.println("12. Consulter les statistiques");
+        System.out.println("13. Retour au menu principal");
         System.out.print("Votre choix : ");
         return lireEntier();
     }
@@ -508,6 +510,43 @@ public class VueConsole {
         System.out.println("Groupe ajoute avec succes (ID : " + id + ")");
     }
 
+    // ==================== ADMIN : ASSOCIATIONS MORCEAU <-> ALBUM ====================
+
+    public int demanderIdAlbumAssociation() {
+        System.out.print("ID de l'album : ");
+        return lireEntier();
+    }
+
+    public int demanderIdMorceauAssociation() {
+        System.out.print("ID du morceau a ajouter : ");
+        return lireEntier();
+    }
+
+    public int demanderNumeroPiste() {
+        System.out.print("Numero de piste dans l'album : ");
+        return lireEntier();
+    }
+
+    public void afficherMorceauAjouteDansAlbum(String titreMorceau, String titreAlbum) {
+        System.out.println("\"" + titreMorceau + "\" ajoute dans l'album \"" + titreAlbum + "\" !");
+    }
+
+    // ==================== ADMIN : ASSOCIATIONS ARTISTE <-> GROUPE ====================
+
+    public int demanderIdGroupeAssociation() {
+        System.out.print("ID du groupe : ");
+        return lireEntier();
+    }
+
+    public int demanderIdArtisteAssociation() {
+        System.out.print("ID de l'artiste a ajouter : ");
+        return lireEntier();
+    }
+
+    public void afficherMembreAjouteDansGroupe(String nomArtiste, String nomGroupe) {
+        System.out.println("\"" + nomArtiste + "\" ajoute comme membre de \"" + nomGroupe + "\" !");
+    }
+
     // ==================== ADMIN : GESTION COMPTES ====================
 
     public void afficherListeAbonnes(List<String[]> abonnes) {
@@ -544,7 +583,7 @@ public class VueConsole {
     // ==================== ADMIN : STATISTIQUES ====================
 
     public void afficherStatistiques(int nbMorceaux, int nbAlbums, int nbArtistes,
-                                      int nbGroupes, int nbUtilisateurs, int nbEcoutes) {
+                                     int nbGroupes, int nbUtilisateurs, int nbEcoutes) {
         System.out.println("\n--- STATISTIQUES ---");
         System.out.println("  Morceaux      : " + nbMorceaux);
         System.out.println("  Albums        : " + nbAlbums);
@@ -676,7 +715,7 @@ public class VueConsole {
             int num = 1;
             for (Morceau m : morceaux) {
                 System.out.println("  " + num + ". " + m.getTitre() + " - " + m.getNomInterprete()
-                                   + " (" + m.getDureeFormatee() + ") [ID:" + m.getId() + "]");
+                        + " (" + m.getDureeFormatee() + ") [ID:" + m.getId() + "]");
                 num++;
             }
             System.out.println("  Duree totale : " + playlist.getDureeTotaleFormatee());

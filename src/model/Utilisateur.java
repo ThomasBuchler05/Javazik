@@ -113,4 +113,134 @@ public class Utilisateur {
     public boolean verifierMdp(String mdpSaisi) {
         return mdpSaisi.equals(this.MDP);
     }
+
+    // ==================== SUSPENSION DE COMPTE ====================
+
+    /**
+     * Vérifie si un compte est suspendu.
+     * Un compte suspendu a le flag "SUSPENDU" en parts[5] (ou parts[6] si admin flag présent).
+     * Convention : on ajoute ";SUSPENDU" à la fin de la ligne du fichier.
+     */
+    public static boolean estSuspendu(int idCible) {
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                if (Integer.parseInt(parts[0]) == idCible) {
+                    // Vérifier si un des champs contient "SUSPENDU"
+                    for (String part : parts) {
+                        if (part.equals("SUSPENDU")) return true;
+                    }
+                    return false;
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    /**
+     * Suspend un compte abonné en ajoutant le flag "SUSPENDU" à sa ligne.
+     * Ne peut pas suspendre un administrateur.
+     * Retourne true si la suspension a réussi, false sinon.
+     */
+    public static boolean suspendreCompte(int idCible) {
+        List<String> lignes = new ArrayList<>();
+        boolean trouve = false;
+
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                int id = Integer.parseInt(parts[0]);
+
+                if (id == idCible) {
+                    // Ne pas suspendre les admins
+                    if (parts.length >= 6 && parts[5].equals("0")) {
+                        lignes.add(ligne);
+                        continue;
+                    }
+                    // Vérifier s'il n'est pas déjà suspendu
+                    boolean dejaSuspendu = false;
+                    for (String part : parts) {
+                        if (part.equals("SUSPENDU")) {
+                            dejaSuspendu = true;
+                            break;
+                        }
+                    }
+                    if (dejaSuspendu) {
+                        lignes.add(ligne);
+                    } else {
+                        lignes.add(ligne + ";SUSPENDU");
+                        trouve = true;
+                    }
+                } else {
+                    lignes.add(ligne);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+        if (!trouve) return false;
+
+        try (FileWriter fw = new FileWriter("monfichier.txt", false)) {
+            for (String l : lignes) fw.write(l + "\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return true;
+    }
+
+    /**
+     * Réactive un compte suspendu en retirant le flag "SUSPENDU".
+     * Retourne true si la réactivation a réussi, false sinon.
+     */
+    public static boolean reactiverCompte(int idCible) {
+        List<String> lignes = new ArrayList<>();
+        boolean trouve = false;
+
+        try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                int id = Integer.parseInt(parts[0]);
+
+                if (id == idCible) {
+                    // Reconstruire la ligne sans le flag SUSPENDU
+                    StringBuilder sb = new StringBuilder();
+                    boolean avaitSuspendu = false;
+                    for (int i = 0; i < parts.length; i++) {
+                        if (parts[i].equals("SUSPENDU")) {
+                            avaitSuspendu = true;
+                            continue;
+                        }
+                        if (sb.length() > 0) sb.append(";");
+                        sb.append(parts[i]);
+                    }
+                    lignes.add(sb.toString());
+                    if (avaitSuspendu) trouve = true;
+                } else {
+                    lignes.add(ligne);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+        if (!trouve) return false;
+
+        try (FileWriter fw = new FileWriter("monfichier.txt", false)) {
+            for (String l : lignes) fw.write(l + "\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return true;
+    }
 }

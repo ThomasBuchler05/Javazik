@@ -112,16 +112,18 @@ public class ControleurPrincipal {
                 case 2: adminSupprimerMorceau(); break;
                 case 3: adminAjouterAlbum(); break;
                 case 4: adminSupprimerAlbum(); break;
-                case 5: adminAjouterArtiste(); break;
-                case 6: adminSupprimerArtiste(); break;
-                case 7: adminAjouterGroupe(); break;
-                case 8: adminSupprimerGroupe(); break;
-                case 9: adminGererComptes(); break;
-                case 10: adminStatistiques(); break;
-                case 11: vue.afficherRetourMenuPrincipal(); break;
+                case 5: adminAjouterMorceauDansAlbum(); break;
+                case 6: adminAjouterArtiste(); break;
+                case 7: adminSupprimerArtiste(); break;
+                case 8: adminAjouterGroupe(); break;
+                case 9: adminSupprimerGroupe(); break;
+                case 10: adminAjouterMembreGroupe(); break;
+                case 11: adminGererComptes(); break;
+                case 12: adminStatistiques(); break;
+                case 13: vue.afficherRetourMenuPrincipal(); break;
                 default: vue.afficherChoixInvalide();
             }
-        } while (choix != 11);
+        } while (choix != 13);
     }
 
     private void adminAjouterMorceau() {
@@ -207,6 +209,91 @@ public class ControleurPrincipal {
         }
     }
 
+    // ==================== ADMIN : ASSOCIATION MORCEAU <-> ALBUM ====================
+
+    private void adminAjouterMorceauDansAlbum() {
+        // Afficher les albums disponibles
+        List<Album> albums = Catalogue.getTousLesAlbums();
+        vue.afficherListeAlbums(albums);
+        if (albums.isEmpty()) {
+            vue.afficherMessage("Aucun album dans le catalogue. Creez d'abord un album.");
+            return;
+        }
+
+        int idAlbum = vue.demanderIdAlbumAssociation();
+        Album album = Album.rechercherParId(idAlbum);
+        if (album == null) {
+            vue.afficherElementNonTrouve("album", idAlbum);
+            return;
+        }
+
+        // Afficher le contenu actuel de l'album
+        vue.afficherDetailsAlbum(album);
+
+        // Afficher les morceaux disponibles
+        vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
+
+        int idMorceau = vue.demanderIdMorceauAssociation();
+        Morceau morceau = Morceau.rechercherParId(idMorceau);
+        if (morceau == null) {
+            vue.afficherElementNonTrouve("morceau", idMorceau);
+            return;
+        }
+
+        // Vérifier que le morceau n'est pas déjà dans l'album
+        for (Morceau m : album.getMorceaux()) {
+            if (m.getId() == idMorceau) {
+                vue.afficherMessage("Ce morceau est deja dans cet album.");
+                return;
+            }
+        }
+
+        int numPiste = vue.demanderNumeroPiste();
+        if (Album.ajouterMorceau(idAlbum, idMorceau, numPiste)) {
+            vue.afficherMorceauAjouteDansAlbum(morceau.getTitre(), album.getTitre());
+        } else {
+            vue.afficherMessage("Erreur lors de l'ajout du morceau dans l'album.");
+        }
+    }
+
+    // ==================== ADMIN : ASSOCIATION ARTISTE <-> GROUPE ====================
+
+    private void adminAjouterMembreGroupe() {
+        // Afficher les groupes disponibles
+        List<Groupe> groupes = Catalogue.getTousLesGroupes();
+        vue.afficherListeGroupes(groupes);
+        if (groupes.isEmpty()) {
+            vue.afficherMessage("Aucun groupe dans le catalogue. Creez d'abord un groupe.");
+            return;
+        }
+
+        int idGroupe = vue.demanderIdGroupeAssociation();
+        Groupe groupe = Groupe.rechercherParId(idGroupe);
+        if (groupe == null) {
+            vue.afficherElementNonTrouve("groupe", idGroupe);
+            return;
+        }
+
+        // Afficher les membres actuels
+        vue.afficherDetailsGroupe(groupe);
+
+        // Afficher les artistes disponibles
+        vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
+
+        int idArtiste = vue.demanderIdArtisteAssociation();
+        Artiste artiste = Artiste.rechercherParId(idArtiste);
+        if (artiste == null) {
+            vue.afficherElementNonTrouve("artiste", idArtiste);
+            return;
+        }
+
+        if (Groupe.ajouterMembre(idGroupe, idArtiste)) {
+            vue.afficherMembreAjouteDansGroupe(artiste.getNomComplet(), groupe.getNom());
+        } else {
+            vue.afficherMessage("Cet artiste est deja membre de ce groupe.");
+        }
+    }
+
     private void adminGererComptes() {
         List<String[]> abonnes = chargerAbonnes();
         vue.afficherListeAbonnes(abonnes);
@@ -287,12 +374,12 @@ public class ControleurPrincipal {
 
     private void adminStatistiques() {
         vue.afficherStatistiques(
-            Catalogue.getNombreMorceaux(),
-            Catalogue.getNombreAlbums(),
-            Catalogue.getNombreArtistes(),
-            Catalogue.getNombreGroupes(),
-            compterUtilisateurs(),
-            Historique.getNombreTotalEcoutes()
+                Catalogue.getNombreMorceaux(),
+                Catalogue.getNombreAlbums(),
+                Catalogue.getNombreArtistes(),
+                Catalogue.getNombreGroupes(),
+                compterUtilisateurs(),
+                Historique.getNombreTotalEcoutes()
         );
     }
 
