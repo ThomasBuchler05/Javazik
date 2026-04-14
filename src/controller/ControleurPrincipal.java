@@ -305,6 +305,20 @@ public class ControleurPrincipal {
             } else {
                 vue.afficherAbonneNonTrouve();
             }
+        } else if (choix == 2) {
+            int idAbonne = vue.demanderIdAbonne();
+            if (Utilisateur.suspendreCompte(idAbonne)) {
+                vue.afficherAbonneSuspendu();
+            } else {
+                vue.afficherAbonneNonTrouveOuDejaEtat("suspendu");
+            }
+        } else if (choix == 3) {
+            int idAbonne = vue.demanderIdAbonne();
+            if (Utilisateur.reactiverCompte(idAbonne)) {
+                vue.afficherAbonneReactive();
+            } else {
+                vue.afficherAbonneNonTrouveOuDejaEtat("actif");
+            }
         }
     }
 
@@ -480,6 +494,10 @@ public class ControleurPrincipal {
                         vue.afficherDetailsMorceau(morceau);
                         vue.afficherAlbumsDuMorceau(Catalogue.getAlbumsDepuisMorceau(idM));
                         vue.afficherAutresMorceauxInterprete(Catalogue.getAutresMorceauxMemeInterprete(morceau));
+                        // Afficher la note moyenne
+                        double moyenne = Morceau.getNoteMoyenne(idM);
+                        int nbVotes = Morceau.getNombreVotes(idM);
+                        vue.afficherNoteMorceau(moyenne, nbVotes);
                     } else {
                         vue.afficherErreurId();
                     }
@@ -660,6 +678,18 @@ public class ControleurPrincipal {
 
             Historique.enregistrerEcoute(utilisateur.getID(), m);
 
+            // Proposer de noter le morceau après écoute dans la playlist
+            int noteExistante = Morceau.getNoteClient(m.getId(), utilisateur.getID());
+            int choixNote = vue.proposerNotation(noteExistante);
+            if (choixNote == 1) {
+                int note = vue.demanderNote();
+                if (Morceau.noterMorceau(m.getId(), utilisateur.getID(), note)) {
+                    vue.afficherNoteEnregistree(note);
+                } else {
+                    vue.afficherMessage("Note invalide (doit etre entre 1 et 5).");
+                }
+            }
+
             int action = vue.afficherControlesLecteur(index > 0, index < morceaux.size() - 1);
             switch (action) {
                 case 1: index--; break;
@@ -734,6 +764,17 @@ public class ControleurPrincipal {
 
             if (estAbonne) {
                 Historique.enregistrerEcoute(utilisateur.getID(), m);
+                // Proposer de noter le morceau après écoute
+                int noteExistante = Morceau.getNoteClient(m.getId(), utilisateur.getID());
+                int choixNote = vue.proposerNotation(noteExistante);
+                if (choixNote == 1) {
+                    int note = vue.demanderNote();
+                    if (Morceau.noterMorceau(m.getId(), utilisateur.getID(), note)) {
+                        vue.afficherNoteEnregistree(note);
+                    } else {
+                        vue.afficherMessage("Note invalide (doit etre entre 1 et 5).");
+                    }
+                }
             }
 
             int choixSuite = vue.afficherMenuApresEcoute(estAbonne ? -1 : maxEcoutes - compteur);

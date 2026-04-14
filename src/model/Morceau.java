@@ -81,13 +81,13 @@ public class Morceau {
                 String[] p = ligne.split(";");
                 if (p.length < 7) continue;
                 liste.add(new Morceau(
-                    Integer.parseInt(p[0]),
-                    p[1],
-                    Integer.parseInt(p[2]),
-                    p[3],
-                    Integer.parseInt(p[4]),
-                    Integer.parseInt(p[5]),
-                    Integer.parseInt(p[6])
+                        Integer.parseInt(p[0]),
+                        p[1],
+                        Integer.parseInt(p[2]),
+                        p[3],
+                        Integer.parseInt(p[4]),
+                        Integer.parseInt(p[5]),
+                        Integer.parseInt(p[6])
                 ));
             }
         } catch (FileNotFoundException e) {
@@ -131,8 +131,8 @@ public class Morceau {
         String rech = recherche.toLowerCase();
         for (Morceau m : chargerTous()) {
             if (m.getTitre().toLowerCase().contains(rech)
-                || m.getNomInterprete().toLowerCase().contains(rech)
-                || m.getGenre().toLowerCase().contains(rech)) {
+                    || m.getNomInterprete().toLowerCase().contains(rech)
+                    || m.getGenre().toLowerCase().contains(rech)) {
                 resultats.add(m);
             }
         }
@@ -188,12 +188,12 @@ public class Morceau {
      * Ajoute un morceau et retourne l'objet créé.
      */
     public static Morceau ajouter(String titre, int duree, String genre, int annee,
-                                   int idArtiste, int idGroupe) {
+                                  int idArtiste, int idGroupe) {
         int nouvelId = genererNouvelId();
         Morceau m = new Morceau(nouvelId, titre, duree, genre, annee, idArtiste, idGroupe);
         try (FileWriter fw = new FileWriter(FICHIER, true)) {
             fw.write(nouvelId + ";" + titre + ";" + duree + ";" + genre + ";"
-                     + annee + ";" + idArtiste + ";" + idGroupe + "\n");
+                    + annee + ";" + idArtiste + ";" + idGroupe + "\n");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -243,6 +243,126 @@ public class Morceau {
     @Override
     public String toString() {
         return "[" + id + "] " + titre + " - " + getNomInterprete()
-               + " (" + annee + ") [" + genre + "] " + getDureeFormatee();
+                + " (" + annee + ") [" + genre + "] " + getDureeFormatee();
+    }
+
+    // ==================== NOTES ====================
+
+    private static final String FICHIER_NOTES = "notes.txt";
+
+    /**
+     * Enregistre ou met à jour la note d'un abonné pour ce morceau.
+     * La note doit être entre 1 et 5.
+     * Format du fichier : idMorceau;idClient;note
+     */
+    public static boolean noterMorceau(int idMorceau, int idClient, int note) {
+        if (note < 1 || note > 5) return false;
+
+        List<String> lignes = new ArrayList<>();
+        boolean dejaNote = false;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(FICHIER_NOTES))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] p = ligne.split(";");
+                if (p.length < 3) continue;
+                int idM = Integer.parseInt(p[0]);
+                int idC = Integer.parseInt(p[1]);
+                if (idM == idMorceau && idC == idClient) {
+                    // Mise à jour de la note existante
+                    lignes.add(idMorceau + ";" + idClient + ";" + note);
+                    dejaNote = true;
+                } else {
+                    lignes.add(ligne);
+                }
+            }
+        } catch (FileNotFoundException e) {
+            // fichier pas encore créé, on continue
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+        if (!dejaNote) {
+            lignes.add(idMorceau + ";" + idClient + ";" + note);
+        }
+
+        try (FileWriter fw = new FileWriter(FICHIER_NOTES, false)) {
+            for (String l : lignes) fw.write(l + "\n");
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Retourne la note moyenne d'un morceau (0.0 si aucune note).
+     */
+    public static double getNoteMoyenne(int idMorceau) {
+        int total = 0;
+        int count = 0;
+        try (BufferedReader br = new BufferedReader(new FileReader(FICHIER_NOTES))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] p = ligne.split(";");
+                if (p.length < 3) continue;
+                if (Integer.parseInt(p[0]) == idMorceau) {
+                    total += Integer.parseInt(p[2]);
+                    count++;
+                }
+            }
+        } catch (FileNotFoundException e) {
+            // pas encore de notes
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (count == 0) return 0.0;
+        return (double) total / count;
+    }
+
+    /**
+     * Retourne le nombre de votes pour un morceau.
+     */
+    public static int getNombreVotes(int idMorceau) {
+        int count = 0;
+        try (BufferedReader br = new BufferedReader(new FileReader(FICHIER_NOTES))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] p = ligne.split(";");
+                if (p.length < 3) continue;
+                if (Integer.parseInt(p[0]) == idMorceau) count++;
+            }
+        } catch (FileNotFoundException e) {
+            // pas encore de notes
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return count;
+    }
+
+    /**
+     * Retourne la note donnée par un client pour ce morceau, ou 0 si pas encore noté.
+     */
+    public static int getNoteClient(int idMorceau, int idClient) {
+        try (BufferedReader br = new BufferedReader(new FileReader(FICHIER_NOTES))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] p = ligne.split(";");
+                if (p.length < 3) continue;
+                if (Integer.parseInt(p[0]) == idMorceau && Integer.parseInt(p[1]) == idClient) {
+                    return Integer.parseInt(p[2]);
+                }
+            }
+        } catch (FileNotFoundException e) {
+            // pas encore de notes
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return 0;
     }
 }

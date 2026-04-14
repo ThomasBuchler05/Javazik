@@ -556,13 +556,20 @@ public class VueConsole {
             return;
         }
         for (String[] a : abonnes) {
-            System.out.println("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4]);
+            boolean suspendu = false;
+            for (String part : a) {
+                if (part.equals("SUSPENDU")) { suspendu = true; break; }
+            }
+            String statut = suspendu ? " [SUSPENDU]" : " [ACTIF]";
+            System.out.println("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4] + statut);
         }
     }
 
     public int afficherMenuGestionComptes() {
         System.out.println("\n1. Supprimer un compte abonne");
-        System.out.println("2. Retour");
+        System.out.println("2. Suspendre un compte abonne");
+        System.out.println("3. Reactiver un compte abonne");
+        System.out.println("4. Retour");
         System.out.print("Votre choix : ");
         return lireEntier();
     }
@@ -578,6 +585,18 @@ public class VueConsole {
 
     public void afficherAbonneNonTrouve() {
         System.out.println("Abonne non trouve.");
+    }
+
+    public void afficherAbonneSuspendu() {
+        System.out.println("Compte abonne suspendu avec succes.");
+    }
+
+    public void afficherAbonneReactive() {
+        System.out.println("Compte abonne reactive avec succes.");
+    }
+
+    public void afficherAbonneNonTrouveOuDejaEtat(String etat) {
+        System.out.println("Abonne non trouve ou compte deja " + etat + ".");
     }
 
     // ==================== ADMIN : STATISTIQUES ====================
@@ -641,14 +660,79 @@ public class VueConsole {
 
     public void afficherEcoute(Morceau m) {
         System.out.println("\n  ♪ Lecture : " + m.getTitre() + " - " + m.getNomInterprete());
-        System.out.print("  ");
-        int ticks = Math.min(m.getDuree() / 20, 20); // simulation proportionnelle, max 20
-        if (ticks < 5) ticks = 5;
+
+        int dureeReelle = m.getDuree(); // durée en secondes
+        // Simulation proportionnelle : 1s réelle = 1s de chanson, plafonné à 20s max
+        int tempsSimule = Math.min(dureeReelle, 14);
+        int ticks = tempsSimule; // 1 tick = 1 seconde simulée (100ms réelle)
+        if (ticks < 3) ticks = 3;
+
+        System.out.print("  [");
         for (int i = 0; i < ticks; i++) {
             System.out.print("▓");
-            try { Thread.sleep(100); } catch (InterruptedException e) {}
+            try { Thread.sleep(100 * dureeReelle / Math.max(ticks, 1)); } catch (InterruptedException e) {}
         }
-        System.out.println(" (" + m.getDureeFormatee() + ")");
+        System.out.println("] (" + m.getDureeFormatee() + ")");
+    }
+
+    // ==================== NOTES ====================
+
+    /**
+     * Affiche la note moyenne d'un morceau avec étoiles visuelles.
+     */
+    public void afficherNoteMorceau(double moyenne, int nbVotes) {
+        if (nbVotes == 0) {
+            System.out.println("  Note      : Aucune note pour l'instant.");
+        } else {
+            // Affichage étoiles : ★ pour étoile pleine, ☆ pour étoile vide
+            StringBuilder etoiles = new StringBuilder();
+            int pleines = (int) Math.round(moyenne);
+            for (int i = 1; i <= 5; i++) {
+                etoiles.append(i <= pleines ? "★" : "☆");
+            }
+            System.out.printf("  Note      : %s  %.1f/5 (%d vote%s)%n",
+                    etoiles, moyenne, nbVotes, nbVotes > 1 ? "s" : "");
+        }
+    }
+
+    /**
+     * Propose à l'abonné de noter le morceau qu'il vient d'écouter.
+     * Affiche sa note actuelle si elle existe.
+     * Retourne 1 pour noter, 2 pour passer.
+     */
+    public int proposerNotation(int noteActuelle) {
+        System.out.println();
+        if (noteActuelle > 0) {
+            System.out.println("  Votre note actuelle pour ce morceau : " + noteActuelle + "/5");
+            System.out.println("  1. Modifier ma note");
+        } else {
+            System.out.println("  1. Noter ce morceau (1 a 5)");
+        }
+        System.out.println("  2. Passer");
+        System.out.print("  Votre choix : ");
+        return lireEntier();
+    }
+
+    /**
+     * Demande une note entre 1 et 5.
+     */
+    public int demanderNote() {
+        int note = 0;
+        while (note < 1 || note > 5) {
+            System.out.print("  Votre note (1 a 5) : ");
+            note = lireEntier();
+            if (note < 1 || note > 5) System.out.println("  Note invalide, entrez un chiffre entre 1 et 5.");
+        }
+        return note;
+    }
+
+    /**
+     * Confirme que la note a bien été enregistrée.
+     */
+    public void afficherNoteEnregistree(int note) {
+        StringBuilder etoiles = new StringBuilder();
+        for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "★" : "☆");
+        System.out.println("  Note enregistree : " + etoiles + " (" + note + "/5)");
     }
 
     // ==================== PLAYLISTS ====================
