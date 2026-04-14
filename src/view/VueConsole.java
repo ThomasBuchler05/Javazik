@@ -663,7 +663,7 @@ public class VueConsole {
 
         int dureeReelle = m.getDuree(); // durée en secondes
         // Simulation proportionnelle : 1s réelle = 1s de chanson, plafonné à 20s max
-        int tempsSimule = Math.min(dureeReelle, 14);
+        int tempsSimule = Math.min(dureeReelle, 20);
         int ticks = tempsSimule; // 1 tick = 1 seconde simulée (100ms réelle)
         if (ticks < 3) ticks = 3;
 
