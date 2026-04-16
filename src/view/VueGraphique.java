@@ -2,808 +2,742 @@ package view;
 
 import model.*;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
- * Vue graphique Swing — étend VueConsole pour hériter de toutes ses méthodes
- * et surcharger uniquement celles qui ont un rendu graphique.
+ * Vue graphique Swing pour JavaZik.
+ *
+ * Architecture :
+ *   - Fenêtre principale en mode "maximisée" (plein écran windowed)
+ *   - Sidebar gauche (260 px) — contenu contextuel selon l'état de session
+ *     (déconnecté / visiteur / client / admin)
+ *   - Zone de contenu droite avec CardLayout — un JPanel par écran
+ *
+ * Synchronisation EDT / thread contrôleur :
+ *   Les méthodes comme {@link #afficherMenuPrincipal()} sont appelées depuis
+ *   le thread du contrôleur et doivent bloquer jusqu'à ce qu'un clic ait lieu
+ *   sur l'EDT. On utilise pour cela la classe interne {@link InputRequest}
+ *   basée sur une {@link SynchronousQueue} : le thread contrôleur attend sur
+ *   {@code await()}, l'EDT livre la valeur via {@code submit(valeur)}.
  */
-public class VueGraphique extends VueConsole {
+public final class VueGraphique extends VueConsole {
+
+    // ==================== ÉTATS DE SESSION ====================
+
+    public enum SessionState { DECONNECTE, VISITEUR, CLIENT, ADMIN }
+
+    private SessionState sessionState = SessionState.DECONNECTE;
+    private String nomUtilisateur = null; // null si non connecté
+
+    // ==================== COMPOSANTS SWING ====================
 
     private JFrame fenetre;
-    private JTextArea zoneAffichage;
-    private JTextField champSaisie;
+    private JPanel sidebarPanel;
+    private JLabel labelUser;
+    private JPanel contentPanel;
+    private CardLayout contentLayout;
 
-    // ActionListener courant (on le remplace à chaque appel de lireLigne)
-    private java.awt.event.ActionListener listenerActuel = null;
+    /** Liste des boutons sidebar courants, pour gérer l'état "actif". */
+    private final List<SidebarButton> boutonsSidebar = new ArrayList<>();
+    /** Carte actuellement affichée. */
+    private String cardCourante = "accueil";
+
+    /**
+     * Référence vers la saisie utilisateur en cours. Utilisée par le
+     * WindowListener pour injecter une valeur de "fermeture" si l'utilisateur
+     * clique la croix pendant qu'un {@code await()} est en cours.
+     */
+    private final AtomicReference<InputRequest<?>> requeteCourante = new AtomicReference<>();
+
+    // ==================== CONSTRUCTEUR ====================
 
     public VueGraphique() {
-        fenetre = new JFrame("JavaZik 🎵");
-        fenetre.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        fenetre.setSize(700, 500);
+        // Construction sur l'EDT pour éviter tout problème de thread-safety Swing
+        try {
+            if (SwingUtilities.isEventDispatchThread()) {
+                buildUI();
+            } else {
+                SwingUtilities.invokeAndWait(this::buildUI);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Erreur construction UI", e);
+        }
+    }
+
+    private final void buildUI() {
+        fenetre = new JFrame("JAVAZIK");
+        // On gère la fermeture manuellement pour injecter une valeur "quitter"
+        // au contrôleur s'il est en train d'attendre une saisie.
+        fenetre.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        fenetre.setMinimumSize(new Dimension(1000, 650));
         fenetre.setLayout(new BorderLayout());
+        fenetre.setExtendedState(JFrame.MAXIMIZED_BOTH);
 
-        // Zone d'affichage
-        zoneAffichage = new JTextArea();
-        zoneAffichage.setEditable(false);
-        zoneAffichage.setFont(new Font("Monospaced", Font.PLAIN, 13));
-        zoneAffichage.setBackground(new Color(30, 30, 30));
-        zoneAffichage.setForeground(new Color(200, 230, 200));
-        zoneAffichage.setMargin(new Insets(10, 10, 10, 10));
-        fenetre.add(new JScrollPane(zoneAffichage), BorderLayout.CENTER);
+        fenetre.addWindowListener(new WindowAdapter() {
+            @Override public void windowClosing(WindowEvent e) {
+                handleWindowClosing();
+            }
+        });
 
-        // Champ de saisie en bas
-        champSaisie = new JTextField();
-        champSaisie.setFont(new Font("Monospaced", Font.PLAIN, 13));
-        champSaisie.setBackground(new Color(50, 50, 50));
-        champSaisie.setForeground(Color.WHITE);
-        champSaisie.setCaretColor(Color.WHITE);
-        JLabel labelPrompt = new JLabel("  > ");
-        labelPrompt.setForeground(new Color(100, 200, 100));
-        labelPrompt.setFont(new Font("Monospaced", Font.BOLD, 13));
-        JPanel panneauBas = new JPanel(new BorderLayout());
-        panneauBas.setBackground(new Color(40, 40, 40));
-        panneauBas.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(80, 80, 80)));
-        panneauBas.add(labelPrompt, BorderLayout.WEST);
-        panneauBas.add(champSaisie, BorderLayout.CENTER);
-        fenetre.add(panneauBas, BorderLayout.SOUTH);
+        // Sidebar
+        sidebarPanel = new JPanel();
+        sidebarPanel.setLayout(new BoxLayout(sidebarPanel, BoxLayout.Y_AXIS));
+        sidebarPanel.setBackground(Styles.TEAL);
+        sidebarPanel.setPreferredSize(new Dimension(Styles.SIDEBAR_WIDTH, 0));
+        sidebarPanel.setBorder(new EmptyBorder(Styles.PADDING_LG, 0, Styles.PADDING_LG, 0));
+        fenetre.add(sidebarPanel, BorderLayout.WEST);
+
+        // Zone de contenu avec CardLayout
+        contentLayout = new CardLayout();
+        contentPanel = new JPanel(contentLayout);
+        contentPanel.setBackground(Styles.BG_MAIN);
+        fenetre.add(contentPanel, BorderLayout.CENTER);
+
+        registerCards();
+        rebuildSidebar();
 
         fenetre.setLocationRelativeTo(null);
         fenetre.setVisible(true);
-        champSaisie.requestFocus();
+    }
+
+    /**
+     * Appelé quand l'utilisateur clique la croix de la fenêtre.
+     * Si une saisie est en cours côté contrôleur, on lui envoie une valeur
+     * d'annulation ; sinon, on ferme directement.
+     */
+    private void handleWindowClosing() {
+        InputRequest<?> r = requeteCourante.get();
+        if (r != null) {
+            // Envoi d'une valeur spéciale : le contrôleur la traitera comme
+            // "retour menu principal" puis recevra 5 (quitter) au prochain
+            // afficherMenuPrincipal().
+            r.cancelWithDefault();
+        }
+        // Dispose + exit proprement
+        fenetre.dispose();
+        System.exit(0);
+    }
+
+    // ==================== ENREGISTREMENT DES CARTES ====================
+
+    private final void registerCards() {
+        contentPanel.add(buildAccueilCard(),         "accueil");
+        contentPanel.add(placeholder("Catalogue",    "Parcours des morceaux, albums, artistes et groupes."), "catalogue");
+        contentPanel.add(placeholder("Écouter",      "Lecture d'un morceau au choix."),                      "ecoute");
+
+        contentPanel.add(placeholder("Connexion administrateur", "Saisissez vos identifiants admin."),      "connexionAdmin");
+        contentPanel.add(placeholder("Connexion client",         "Saisissez vos identifiants abonné."),     "connexionClient");
+        contentPanel.add(placeholder("Créer un compte client",   "Inscription en tant qu'abonné."),         "inscription");
+
+        contentPanel.add(placeholder("Mes playlists",  "Créer, renommer, supprimer, ajouter des morceaux."),"playlists");
+        contentPanel.add(placeholder("Mon historique", "Consultation des morceaux récemment écoutés."),     "historique");
+
+        contentPanel.add(placeholder("Gérer le catalogue", "Ajouter ou supprimer morceaux, albums, artistes, groupes."), "gestionCatalogue");
+        contentPanel.add(placeholder("Gérer les comptes", "Suspendre, réactiver ou supprimer un compte abonné."),        "gestionComptes");
+        contentPanel.add(placeholder("Statistiques",      "Vue d'ensemble du catalogue et de l'activité."),              "statistiques");
+    }
+
+    // ==================== CONSTRUCTION DE LA SIDEBAR (contextuelle) ====================
+
+    /**
+     * Reconstruit entièrement la sidebar en fonction de sessionState.
+     * Appelé au démarrage et à chaque changement d'état.
+     * IMPORTANT : doit être appelé sur l'EDT.
+     */
+    private final void rebuildSidebar() {
+        sidebarPanel.removeAll();
+        boutonsSidebar.clear();
+
+        sidebarPanel.add(buildLogoHeader());
+        sidebarPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        sidebarPanel.add(buildUserHeader());
+        sidebarPanel.add(Box.createVerticalStrut(Styles.PADDING_LG));
+
+        sidebarPanel.add(buildSeparator());
+        sidebarPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+
+        switch (sessionState) {
+            case DECONNECTE:
+                addSidebarButton("Accueil",                  "accueil");
+                addSidebarButton("Connexion administrateur", "connexionAdmin");
+                addSidebarButton("Connexion client",         "connexionClient");
+                addSidebarButton("Créer un compte",          "inscription");
+                addSidebarButton("Continuer en visiteur",    "visiteurAction"); // action, pas une carte
+                break;
+            case VISITEUR:
+                addSidebarButton("Accueil",    "accueil");
+                addSidebarButton("Catalogue",  "catalogue");
+                addSidebarButton("Écouter",    "ecoute");
+                break;
+            case CLIENT:
+                addSidebarButton("Accueil",       "accueil");
+                addSidebarButton("Catalogue",     "catalogue");
+                addSidebarButton("Mes playlists", "playlists");
+                addSidebarButton("Écouter",       "ecoute");
+                addSidebarButton("Historique",    "historique");
+                break;
+            case ADMIN:
+                addSidebarButton("Accueil",             "accueil");
+                addSidebarButton("Catalogue",           "catalogue");
+                addSidebarButton("Gérer le catalogue",  "gestionCatalogue");
+                addSidebarButton("Gérer les comptes",   "gestionComptes");
+                addSidebarButton("Statistiques",        "statistiques");
+                break;
+        }
+
+        sidebarPanel.add(Box.createVerticalGlue());
+
+        sidebarPanel.add(buildSeparator());
+        sidebarPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+
+        if (sessionState == SessionState.DECONNECTE) {
+            sidebarPanel.add(buildSidebarActionButton("Quitter", "quitter"));
+        } else {
+            sidebarPanel.add(buildSidebarActionButton("Se déconnecter", "deconnexion"));
+        }
+
+        highlightActiveButton();
+        refreshSidebarButtonsState();
+
+        sidebarPanel.revalidate();
+        sidebarPanel.repaint();
+    }
+
+    private JPanel buildLogoHeader() {
+        JPanel p = transparentPanel();
+        p.setLayout(new FlowLayout(FlowLayout.LEFT, Styles.PADDING_LG, 0));
+        JLabel logo = new JLabel("JAVAZIK  \u266A");
+        logo.setFont(Styles.FONT_LOGO);
+        logo.setForeground(Styles.TEXT_ON_TEAL);
+        p.add(logo);
+        p.setAlignmentX(Component.LEFT_ALIGNMENT);
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        return p;
+    }
+
+    private JPanel buildUserHeader() {
+        JPanel p = transparentPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBorder(new EmptyBorder(0, Styles.PADDING_LG, 0, Styles.PADDING_LG));
+        p.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        labelUser = new JLabel(labelForSession());
+        labelUser.setFont(Styles.FONT_SMALL);
+        labelUser.setForeground(new Color(255, 255, 255, 200));
+        labelUser.setAlignmentX(Component.LEFT_ALIGNMENT);
+        p.add(labelUser);
+
+        p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+        return p;
+    }
+
+    private String labelForSession() {
+        switch (sessionState) {
+            case DECONNECTE: return "Non connecté";
+            case VISITEUR:   return "Mode visiteur";
+            case CLIENT:     return "Connecté : " + (nomUtilisateur != null ? nomUtilisateur : "abonné");
+            case ADMIN:      return "Administrateur : " + (nomUtilisateur != null ? nomUtilisateur : "admin");
+            default:         return "";
+        }
+    }
+
+    private JPanel buildSeparator() {
+        JPanel sep = new JPanel();
+        sep.setBackground(new Color(255, 255, 255, 60));
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setPreferredSize(new Dimension(Styles.SIDEBAR_WIDTH, 1));
+        return sep;
+    }
+
+    /**
+     * Ajoute un bouton sidebar. Le {@code actionKey} est une chaîne qui
+     * identifie le bouton (soit une carte de CardLayout, soit une action
+     * spéciale comme "quitter", "deconnexion", "visiteurAction").
+     */
+    private final void addSidebarButton(String label, String actionKey) {
+        SidebarButton b = new SidebarButton(label, actionKey);
+        b.addActionListener(e -> onSidebarClick(actionKey));
+        boutonsSidebar.add(b);
+        sidebarPanel.add(b);
+        sidebarPanel.add(Box.createVerticalStrut(2));
+    }
+
+    private JComponent buildSidebarActionButton(String label, String actionKey) {
+        SidebarButton b = new SidebarButton(label, actionKey);
+        b.markAsFooter();
+        b.addActionListener(e -> onSidebarClick(actionKey));
+        boutonsSidebar.add(b);
+        return b;
+    }
+
+    private void highlightActiveButton() {
+        for (SidebarButton b : boutonsSidebar) {
+            b.setActive(cardCourante.equals(b.getActionKey()));
+        }
+    }
+
+    // ==================== ROUTAGE DES CLICS SIDEBAR ====================
+
+    /**
+     * Dispatch central pour tous les clics sidebar.
+     * Deux chemins possibles selon qu'une saisie est en cours ou non.
+     */
+    private void onSidebarClick(String actionKey) {
+        InputRequest<?> r = requeteCourante.get();
+        if (r != null && r.acceptsSidebarKey(actionKey)) {
+            r.submitForKey(actionKey);
+            return;
+        }
+        if (isCardKey(actionKey)) {
+            showCard(actionKey);
+        }
+        // Si ce n'est pas une carte et qu'aucune saisie n'attend : no-op.
+    }
+
+    private boolean isCardKey(String key) {
+        // Les clés qui ne sont PAS des cartes (purement actionnelles).
+        return !(key.equals("quitter")
+              || key.equals("deconnexion")
+              || key.equals("visiteurAction"));
+    }
+
+    /** Affiche la carte demandée (navigation pure, sans effet contrôleur). */
+    public void showCard(String name) {
+        cardCourante = name;
+        contentLayout.show(contentPanel, name);
+        highlightActiveButton();
+    }
+
+    // ==================== GESTION DES ÉTATS DE SESSION ====================
+
+    /**
+     * Changement d'état de session + reconstruction sidebar.
+     * Thread-safe : s'exécute sur l'EDT même si appelée d'ailleurs.
+     */
+    public void setSessionState(SessionState newState, String utilisateur) {
+        runOnEdt(() -> {
+            this.sessionState = newState;
+            this.nomUtilisateur = utilisateur;
+            cardCourante = "accueil";
+            rebuildSidebar();
+            contentLayout.show(contentPanel, "accueil");
+        });
+    }
+
+    // ==================== CARTES (placeholders) ====================
+
+    private JPanel buildAccueilCard() {
+        JPanel card = new JPanel();
+        card.setBackground(Styles.BG_MAIN);
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBorder(new EmptyBorder(80, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
+
+        JLabel titre = Styles.titleLabel("Bienvenue sur JAVAZIK");
+        titre.setFont(Styles.FONT_TITLE.deriveFont(36f));
+        titre.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel sousTitre = Styles.mutedLabel("Votre catalogue musical, vos playlists, votre historique d'écoute.");
+        sousTitre.setFont(Styles.FONT_BODY.deriveFont(16f));
+        sousTitre.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel cta = Styles.bodyLabel("Choisissez une action dans le menu de gauche pour commencer.");
+        cta.setForeground(Styles.TEXT_MUTED);
+        cta.setBorder(new EmptyBorder(Styles.PADDING_LG, 0, 0, 0));
+        cta.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        card.add(titre);
+        card.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        card.add(sousTitre);
+        card.add(cta);
+        card.add(Box.createVerticalGlue());
+
+        return card;
+    }
+
+    private JPanel placeholder(String titre, String description) {
+        JPanel card = new JPanel();
+        card.setBackground(Styles.BG_MAIN);
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2,
+                                       Styles.PADDING_LG, Styles.PADDING_LG * 2));
+
+        JLabel t = Styles.titleLabel(titre);
+        t.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel d = Styles.mutedLabel(description);
+        d.setBorder(new EmptyBorder(Styles.PADDING_SM, 0, 0, 0));
+        d.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel todo = new JLabel("Écran en cours de construction.");
+        todo.setFont(Styles.FONT_SMALL);
+        todo.setForeground(Styles.TEXT_MUTED);
+        todo.setBorder(new EmptyBorder(Styles.PADDING_LG, 0, 0, 0));
+        todo.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        card.add(t);
+        card.add(d);
+        card.add(todo);
+        card.add(Box.createVerticalGlue());
+
+        return card;
     }
 
     // ==================== UTILITAIRES INTERNES ====================
 
-    private void afficher(String texte) {
-        SwingUtilities.invokeLater(() -> {
-            zoneAffichage.append(texte + "\n");
-            zoneAffichage.setCaretPosition(zoneAffichage.getDocument().getLength());
-        });
+    private JPanel transparentPanel() {
+        JPanel p = new JPanel();
+        p.setOpaque(false);
+        return p;
     }
 
     /**
-     * Bloque jusqu'à ce que l'utilisateur appuie sur Entrée.
-     * On supprime l'ancien listener avant d'en ajouter un nouveau
-     * pour éviter les accumulations.
+     * Exécute un Runnable sur l'EDT. Si on y est déjà, exécute directement.
+     * Utilisé pour tout ce qui touche à l'UI depuis le thread contrôleur.
      */
-    private String lireLigne() {
-        final String[] resultat = {null};
-
-        // Retirer l'ancien listener s'il existe
-        if (listenerActuel != null) {
-            champSaisie.removeActionListener(listenerActuel);
+    private void runOnEdt(Runnable r) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            r.run();
+        } else {
+            SwingUtilities.invokeLater(r);
         }
-
-        listenerActuel = e -> {
-            resultat[0] = champSaisie.getText().trim();
-            champSaisie.setText("");
-        };
-        champSaisie.addActionListener(listenerActuel);
-
-        while (resultat[0] == null) {
-            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
-        }
-        final String valeur = resultat[0];
-        afficher("  → " + valeur);
-        return valeur;
     }
 
-    private int lireEntier() {
-        while (true) {
-            try {
-                return Integer.parseInt(lireLigne());
-            } catch (NumberFormatException e) {
-                afficher("⚠ Saisie invalide, entrez un nombre.");
+    /**
+     * Ancien système de désactivation des boutons non armés par une requête
+     * en cours — retiré car causait races et mauvaise UX. Les boutons non
+     * armés restent cliquables et font juste de la navigation pure (changement
+     * de carte), sans soumettre de valeur au contrôleur.
+     *
+     * Gardé comme no-op pour ne pas casser les appels existants.
+     */
+    private void refreshSidebarButtonsState() {
+        // no-op intentionnel
+    }
+
+    // ==================== DIALOGS DE SAISIE (modaux, bloquants) ====================
+
+    /**
+     * Affiche un dialog de saisie texte et bloque le thread appelant jusqu'à
+     * ce que l'utilisateur valide ou annule. Retourne la chaîne saisie, ou ""
+     * si annulation/fermeture.
+     *
+     * À appeler depuis le thread contrôleur. La logique UI s'exécute sur l'EDT.
+     */
+    private String promptText(String titre, String message) {
+        final String[] resultat = {""};
+        try {
+            Runnable r = () -> {
+                Object rep = JOptionPane.showInputDialog(
+                        fenetre, message, titre,
+                        JOptionPane.PLAIN_MESSAGE);
+                resultat[0] = (rep == null) ? "" : rep.toString();
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                r.run();
+            } else {
+                SwingUtilities.invokeAndWait(r);
             }
-        }
+        } catch (Exception ignored) {}
+        return resultat[0];
     }
 
     /**
-     * Affiche une boîte de dialogue modale avec des boutons numérotés.
-     * Doit être appelable depuis n'importe quel thread : utilise invokeAndWait
-     * pour garantir que la création et l'affichage se font sur l'EDT.
+     * Affiche un dialog de saisie mot de passe (caractères masqués) et bloque
+     * jusqu'à validation. Retourne la chaîne saisie, ou "" si annulation.
      */
-    private int afficherMenuBoutons(String titre, String... options) {
-        final int[] choix = {-1};
+    private String promptPassword(String titre, String message) {
+        final String[] resultat = {""};
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                JDialog dialog = new JDialog(fenetre, titre, true);
-                dialog.setLayout(new GridLayout(options.length, 1, 5, 5));
-                dialog.setSize(350, 50 + options.length * 45);
-                dialog.setLocationRelativeTo(fenetre);
-
-                for (int i = 0; i < options.length; i++) {
-                    final int num = i + 1;
-                    JButton btn = new JButton(num + ". " + options[i]);
-                    btn.setFont(new Font("SansSerif", Font.PLAIN, 13));
-                    btn.addActionListener(e -> {
-                        choix[0] = num;
-                        dialog.dispose();
-                    });
-                    dialog.add(btn);
-                }
-                dialog.setVisible(true); // boucle d'événements imbriquée jusqu'à dispose()
-            });
-        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
-        return choix[0];
-    }
-
-    // ==================== MENU PRINCIPAL ====================
-
-    @Override
-    public void afficherBienvenue() {
-        afficher("====================================");
-        afficher("     BIENVENUE SUR JAVAZIK 🎵");
-        afficher("====================================\n");
-    }
-
-    @Override
-    public int afficherMenuPrincipal() {
-        return afficherMenuBoutons("Menu Principal",
-                "Se connecter en tant qu'administrateur",
-                "Se connecter en tant que client",
-                "Créer un compte client",
-                "Continuer en tant que visiteur",
-                "Quitter");
-    }
-
-    // ==================== MENU ADMIN ====================
-
-    @Override
-    public int afficherMenuAdmin() {
-        return afficherMenuBoutons("Menu Administrateur",
-                "Ajouter un morceau", "Supprimer un morceau",
-                "Ajouter un album", "Supprimer un album",
-                "Ajouter un morceau dans un album",
-                "Ajouter un artiste", "Supprimer un artiste",
-                "Ajouter un groupe", "Supprimer un groupe",
-                "Ajouter un membre à un groupe",
-                "Gérer les comptes abonnés",
-                "Consulter les statistiques",
-                "Retour au menu principal");
-    }
-
-    // ==================== MENU CLIENT ====================
-
-    @Override
-    public int afficherMenuClient() {
-        return afficherMenuBoutons("Menu Client",
-                "Consulter le catalogue",
-                "Créer et gérer une playlist",
-                "Écouter un morceau",
-                "Consulter l'historique d'écoute",
-                "Revenir au menu principal");
-    }
-
-    // ==================== MENU VISITEUR ====================
-
-    @Override
-    public int afficherMenuVisiteur() {
-        return afficherMenuBoutons("Menu Visiteur",
-                "Consulter le catalogue",
-                "Écouter un morceau (5 écoutes max)",
-                "Retour au menu principal");
-    }
-
-    // ==================== MENU CATALOGUE ====================
-
-    @Override
-    public int afficherMenuCatalogue() {
-        return afficherMenuBoutons("Catalogue",
-                "Rechercher (morceau, album, artiste, groupe)",
-                "Voir tous les morceaux",
-                "Voir tous les albums",
-                "Voir tous les artistes",
-                "Voir tous les groupes",
-                "Morceaux par genre",
-                "Retour");
-    }
-
-    @Override
-    public int afficherMenuNavigation() {
-        return afficherMenuBoutons("Navigation",
-                "Détails d'un morceau (par ID)",
-                "Détails d'un album (par ID)",
-                "Détails d'un artiste (par ID)",
-                "Détails d'un groupe (par ID)",
-                "Retour");
-    }
-
-    // ==================== CONNEXION ====================
-
-    @Override
-    public void afficherConnexionAdmin() { afficher("\n--- Connexion Administrateur ---"); }
-
-    @Override
-    public String demanderMail() { afficher("Email :"); return lireLigne(); }
-
-    @Override
-    public String demanderMdp() {
-        final String[] mdp = {""};
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                String saisie = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Connexion", JOptionPane.QUESTION_MESSAGE);
-                mdp[0] = saisie != null ? saisie : "";
-            });
-        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
-        return mdp[0];
-    }
-
-    @Override
-    public void afficherConnexionReussie() { afficher("✅ Connexion réussie !"); }
-
-    @Override
-    public void afficherMdpIncorrect() { afficher("❌ Mot de passe incorrect."); }
-
-    @Override
-    public void afficherMailIncorrect() { afficher("❌ Email introuvable."); }
-
-    @Override
-    public void afficherPasAdmin() { afficher("❌ Ce compte n'est pas administrateur."); }
-
-    // ==================== INSCRIPTION ====================
-
-    @Override
-    public String demanderNom() { afficher("Nom :"); return lireLigne(); }
-
-    @Override
-    public String demanderPrenom() { afficher("Prénom :"); return lireLigne(); }
-
-    @Override
-    public String demanderEmail() { afficher("Email :"); return lireLigne(); }
-
-    @Override
-    public String demanderMotDePasse() {
-        final String[] mdp = {""};
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                String saisie = JOptionPane.showInputDialog(fenetre, "Mot de passe :", "Inscription", JOptionPane.QUESTION_MESSAGE);
-                mdp[0] = saisie != null ? saisie : "";
-            });
-        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
-        return mdp[0];
-    }
-
-    @Override
-    public void afficherInscriptionReussie() { afficher("✅ Inscription réussie !"); }
-
-    // ==================== CATALOGUE ====================
-
-    @Override
-    public String demanderRecherche() { afficher("Recherche :"); return lireLigne(); }
-
-    @Override
-    public void afficherResultatsRecherche(Catalogue.ResultatRecherche r) {
-        if (r.estVide()) { afficher("Aucun résultat trouvé."); return; }
-        afficher("\n" + r.getNombreTotal() + " résultat(s) trouvé(s) :");
-        if (!r.getMorceaux().isEmpty()) {
-            afficher("  -- Morceaux --");
-            for (Morceau m : r.getMorceaux()) afficher("  " + m);
-        }
-        if (!r.getAlbums().isEmpty()) {
-            afficher("  -- Albums --");
-            for (Album a : r.getAlbums()) afficher("  " + a);
-        }
-        if (!r.getArtistes().isEmpty()) {
-            afficher("  -- Artistes --");
-            for (Artiste a : r.getArtistes()) afficher("  " + a);
-        }
-        if (!r.getGroupes().isEmpty()) {
-            afficher("  -- Groupes --");
-            for (Groupe g : r.getGroupes()) afficher("  " + g);
-        }
-    }
-
-    @Override
-    public int demanderIdElement() { afficher("ID :"); return lireEntier(); }
-
-    @Override
-    public void afficherGenresDisponibles(List<String> genres) {
-        afficher("\n--- Genres disponibles ---");
-        for (int i = 0; i < genres.size(); i++)
-            afficher("  " + (i + 1) + ". " + genres.get(i));
-        afficher("Choisissez un genre (numéro) :");
-    }
-
-    @Override
-    public void afficherListeMorceaux(List<Morceau> morceaux) {
-        afficher("\n--- Morceaux ---");
-        if (morceaux.isEmpty()) { afficher("  (aucun morceau)"); return; }
-        for (Morceau m : morceaux) afficher("  " + m);
-    }
-
-    @Override
-    public void afficherListeAlbums(List<Album> albums) {
-        afficher("\n--- Albums ---");
-        if (albums.isEmpty()) { afficher("  (aucun album)"); return; }
-        for (Album a : albums) afficher("  " + a);
-    }
-
-    @Override
-    public void afficherListeArtistes(List<Artiste> artistes) {
-        afficher("\n--- Artistes ---");
-        if (artistes.isEmpty()) { afficher("  (aucun artiste)"); return; }
-        for (Artiste a : artistes) afficher("  " + a);
-    }
-
-    @Override
-    public void afficherListeGroupes(List<Groupe> groupes) {
-        afficher("\n--- Groupes ---");
-        if (groupes.isEmpty()) { afficher("  (aucun groupe)"); return; }
-        for (Groupe g : groupes) afficher("  " + g);
-    }
-
-    // ==================== DÉTAILS ====================
-
-    @Override
-    public void afficherDetailsMorceau(Morceau m) {
-        afficher("\n====== MORCEAU ======");
-        afficher("  ID        : " + m.getId());
-        afficher("  Titre     : " + m.getTitre());
-        afficher("  Interprète: " + m.getNomInterprete());
-        afficher("  Genre     : " + m.getGenre());
-        afficher("  Durée     : " + m.getDureeFormatee());
-        afficher("  Année     : " + m.getAnnee());
-    }
-
-    @Override
-    public void afficherAlbumsDuMorceau(List<Album> albums) {
-        if (albums.isEmpty()) { afficher("  Albums : (aucun)"); return; }
-        afficher("  Présent dans :");
-        for (Album a : albums) afficher("    - " + a.getTitre() + " [ID:" + a.getId() + "]");
-    }
-
-    @Override
-    public void afficherAutresMorceauxInterprete(List<Morceau> autres) {
-        if (!autres.isEmpty()) {
-            afficher("  Autres morceaux du même interprète :");
-            for (Morceau m : autres) afficher("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherDetailsAlbum(Album a) {
-        afficher("\n====== ALBUM ======");
-        afficher("  ID        : " + a.getId());
-        afficher("  Titre     : " + a.getTitre());
-        afficher("  Interprète: " + a.getNomInterprete());
-        afficher("  Année     : " + a.getAnnee());
-        List<Morceau> morceaux = a.getMorceaux();
-        if (!morceaux.isEmpty()) {
-            afficher("  Morceaux :");
-            for (Morceau m : morceaux) afficher("    - " + m.getTitre() + " [ID:" + m.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherAutresAlbumsInterprete(List<Album> autres) {
-        if (!autres.isEmpty()) {
-            afficher("  Autres albums du même interprète :");
-            for (Album a : autres) afficher("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherDetailsArtiste(Artiste a) {
-        afficher("\n====== ARTISTE ======");
-        afficher("  ID          : " + a.getId());
-        afficher("  Nom         : " + a.getNomComplet());
-        afficher("  Nationalité : " + a.getNationalite());
-    }
-
-    @Override
-    public void afficherGroupesDeLArtiste(List<Groupe> groupes) {
-        if (!groupes.isEmpty()) {
-            afficher("  Membre de :");
-            for (Groupe g : groupes) afficher("    - " + g.getNom() + " [ID:" + g.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherMorceauxArtiste(List<Morceau> morceaux) {
-        if (!morceaux.isEmpty()) {
-            afficher("  Morceaux :");
-            for (Morceau m : morceaux) afficher("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherAlbumsArtiste(List<Album> albums) {
-        if (!albums.isEmpty()) {
-            afficher("  Albums :");
-            for (Album a : albums) afficher("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherDetailsGroupe(Groupe g) {
-        afficher("\n====== GROUPE ======");
-        afficher("  ID          : " + g.getId());
-        afficher("  Nom         : " + g.getNom());
-        afficher("  Créé en     : " + g.getDateCreation());
-        afficher("  Nationalité : " + g.getNationalite());
-    }
-
-    @Override
-    public void afficherMorceauxGroupe(List<Morceau> morceaux) {
-        if (!morceaux.isEmpty()) {
-            afficher("  Morceaux :");
-            for (Morceau m : morceaux) afficher("    - " + m.getTitre() + " (" + m.getAnnee() + ") [ID:" + m.getId() + "]");
-        }
-    }
-
-    @Override
-    public void afficherAlbumsGroupe(List<Album> albums) {
-        if (!albums.isEmpty()) {
-            afficher("  Albums :");
-            for (Album a : albums) afficher("    - " + a.getTitre() + " (" + a.getAnnee() + ") [ID:" + a.getId() + "]");
-        }
-    }
-
-    // ==================== ADMIN : AJOUTS / SUPPRESSIONS ====================
-
-    @Override
-    public String demanderTitreMorceau() { afficher("Titre du morceau :"); return lireLigne(); }
-    @Override
-    public int demanderDureeMorceau() { afficher("Durée (secondes) :"); return lireEntier(); }
-    @Override
-    public String demanderGenreMorceau() { afficher("Genre :"); return lireLigne(); }
-    @Override
-    public int demanderAnneeMorceau() { afficher("Année :"); return lireEntier(); }
-    @Override
-    public int demanderIdArtisteMorceau() { afficher("ID de l'artiste (0 si groupe) :"); return lireEntier(); }
-    @Override
-    public int demanderIdGroupeMorceau() { afficher("ID du groupe (0 si artiste solo) :"); return lireEntier(); }
-    @Override
-    public void afficherMorceauAjoute(int id) { afficher("✅ Morceau ajouté (ID:" + id + ")"); }
-
-    @Override
-    public int demanderIdSuppression() { afficher("ID de l'élément à supprimer :"); return lireEntier(); }
-    @Override
-    public void afficherElementSupprime(String type) { afficher("✅ " + type + " supprimé."); }
-    @Override
-    public void afficherElementNonTrouve(String type, int id) { afficher("❌ " + type + " ID:" + id + " introuvable."); }
-
-    @Override
-    public String demanderTitreAlbum() { afficher("Titre de l'album :"); return lireLigne(); }
-    @Override
-    public int demanderAnneeAlbum() { afficher("Année de sortie :"); return lireEntier(); }
-    @Override
-    public int demanderIdArtisteAlbum() { afficher("ID de l'artiste (0 si groupe) :"); return lireEntier(); }
-    @Override
-    public int demanderIdGroupeAlbum() { afficher("ID du groupe (0 si artiste solo) :"); return lireEntier(); }
-    @Override
-    public void afficherAlbumAjoute(int id) { afficher("✅ Album ajouté (ID:" + id + ")"); }
-
-    @Override
-    public String demanderNomArtiste() { afficher("Nom de l'artiste :"); return lireLigne(); }
-    @Override
-    public String demanderPrenomArtiste() { afficher("Prénom de l'artiste :"); return lireLigne(); }
-    @Override
-    public String demanderNationaliteArtiste() { afficher("Nationalité :"); return lireLigne(); }
-    @Override
-    public void afficherArtisteAjoute(int id) { afficher("✅ Artiste ajouté (ID:" + id + ")"); }
-
-    @Override
-    public String demanderNomGroupe() { afficher("Nom du groupe :"); return lireLigne(); }
-    @Override
-    public int demanderDateCreationGroupe() { afficher("Année de création :"); return lireEntier(); }
-    @Override
-    public String demanderNationaliteGroupe() { afficher("Nationalité :"); return lireLigne(); }
-    @Override
-    public void afficherGroupeAjoute(int id) { afficher("✅ Groupe ajouté (ID:" + id + ")"); }
-
-    @Override
-    public int demanderIdAlbumAssociation() { afficher("ID de l'album :"); return lireEntier(); }
-    @Override
-    public int demanderIdMorceauAssociation() { afficher("ID du morceau :"); return lireEntier(); }
-    @Override
-    public int demanderNumeroPiste() { afficher("Numéro de piste :"); return lireEntier(); }
-    @Override
-    public void afficherMorceauAjouteDansAlbum(String titreMorceau, String titreAlbum) {
-        afficher("✅ \"" + titreMorceau + "\" ajouté dans \"" + titreAlbum + "\"");
-    }
-
-    @Override
-    public int demanderIdGroupeAssociation() { afficher("ID du groupe :"); return lireEntier(); }
-    @Override
-    public int demanderIdArtisteAssociation() { afficher("ID de l'artiste :"); return lireEntier(); }
-    @Override
-    public void afficherMembreAjouteDansGroupe(String nomArtiste, String nomGroupe) {
-        afficher("✅ \"" + nomArtiste + "\" ajouté dans \"" + nomGroupe + "\"");
-    }
-
-    // ==================== COMPTES ABONNÉS ====================
-
-    @Override
-    public void afficherListeAbonnes(List<String[]> abonnes) {
-        afficher("\n--- Abonnés ---");
-        if (abonnes.isEmpty()) { afficher("Aucun abonné."); return; }
-        for (String[] a : abonnes) {
-            boolean suspendu = false;
-            for (String part : a) {
-                if (part.equals("SUSPENDU")) { suspendu = true; break; }
-            }
-            String statut = suspendu ? " [SUSPENDU]" : " [ACTIF]";
-            afficher("  [" + a[0] + "] " + a[1] + " " + a[2] + " - " + a[4] + statut);
-        }
-    }
-
-    @Override
-    public int afficherMenuGestionComptes() {
-        return afficherMenuBoutons("Gestion comptes",
-                "Supprimer un compte abonné",
-                "Suspendre un compte abonné",
-                "Réactiver un compte abonné",
-                "Retour");
-    }
-
-    @Override
-    public int demanderIdAbonne() { afficher("ID de l'abonné :"); return lireEntier(); }
-    @Override
-    public void afficherAbonneSupprime() { afficher("✅ Compte supprimé."); }
-    @Override
-    public void afficherAbonneNonTrouve() { afficher("❌ Abonné introuvable."); }
-    @Override
-    public void afficherAbonneSuspendu() { afficher("✅ Compte suspendu."); }
-    @Override
-    public void afficherAbonneReactive() { afficher("✅ Compte réactivé."); }
-    @Override
-    public void afficherAbonneNonTrouveOuDejaEtat(String etat) {
-        afficher("❌ Abonné introuvable ou déjà " + etat + ".");
-    }
-
-    // ==================== STATISTIQUES ====================
-
-    @Override
-    public void afficherStatistiques(int nbMorceaux, int nbAlbums, int nbArtistes, int nbGroupes, int nbUtilisateurs, int nbEcoutes) {
-        afficher("\n--- Statistiques ---");
-        afficher("  Morceaux      : " + nbMorceaux);
-        afficher("  Albums        : " + nbAlbums);
-        afficher("  Artistes      : " + nbArtistes);
-        afficher("  Groupes       : " + nbGroupes);
-        afficher("  Utilisateurs  : " + nbUtilisateurs);
-        afficher("  Écoutes total : " + nbEcoutes);
-    }
-
-    // ==================== ÉCOUTE ====================
-
-    @Override
-    public String demanderRechercheMusique() { afficher("\nRechercher (titre, artiste, genre) :"); return lireLigne(); }
-
-    @Override
-    public void afficherResultatsEcoute(List<Morceau> resultats) {
-        if (resultats.isEmpty()) { afficher("Aucun morceau trouvé."); return; }
-        afficher("\nRésultats :");
-        for (Morceau m : resultats) afficher("  " + m);
-    }
-
-    @Override
-    public int demanderIdMorceauEcoute() { afficher("ID du morceau à écouter :"); return lireEntier(); }
-
-    @Override
-    public int afficherMenuApresEchecRecherche() {
-        return afficherMenuBoutons("Aucun résultat", "Rechercher autre chose", "Retour");
-    }
-
-    @Override
-    public int afficherMenuApresEcoute(int ecoutesRestantes) {
-        if (ecoutesRestantes >= 0) afficher("Écoutes restantes : " + ecoutesRestantes);
-        return afficherMenuBoutons("Après écoute", "Écouter un autre morceau", "Retour");
-    }
-
-    @Override
-    public void afficherLimiteEcoutesAtteinte() {
-        afficher("\n⚠ Limite d'écoutes atteinte. Créez un compte pour continuer !");
-    }
-
-    /**
-     * Simule la lecture d'un morceau avec une barre de progression animée.
-     * La durée de simulation est proportionnelle à la durée réelle (entre 2 et 5 secondes).
-     * Utilise invokeAndWait pour créer et afficher le dialogue sur l'EDT.
-     */
-    @Override
-    public void afficherEcoute(Morceau m) {
-        afficher("\n  ♪ Lecture : " + m.getTitre() + " — " + m.getNomInterprete()
-                + "  (" + m.getDureeFormatee() + ")");
-
-        // Durée simulée proportionnelle à la durée réelle, plafonnée entre 2s et 5s
-        int dureeReelle = m.getDuree();
-        int dureeSimuleeMs = Math.max(2000, Math.min(5000, dureeReelle * 50));
-        int delaiParTick = Math.max(20, dureeSimuleeMs / 100);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                JDialog dialog = new JDialog(fenetre, "♪ Lecture en cours", true);
-                dialog.setLayout(new BorderLayout(10, 10));
-                dialog.setSize(420, 130);
-                dialog.setLocationRelativeTo(fenetre);
-                dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-                dialog.getContentPane().setBackground(new Color(40, 40, 40));
-
-                // Titre et interprète du morceau
-                JLabel labelInfo = new JLabel(
-                        "  " + m.getTitre() + "  —  " + m.getNomInterprete(), SwingConstants.CENTER);
-                labelInfo.setForeground(new Color(200, 230, 200));
-                labelInfo.setFont(new Font("Monospaced", Font.BOLD, 12));
-                dialog.add(labelInfo, BorderLayout.NORTH);
-
-                // Barre de progression
-                JProgressBar barre = new JProgressBar(0, 100);
-                barre.setStringPainted(true);
-                barre.setForeground(new Color(100, 200, 100));
-                barre.setBackground(new Color(50, 50, 50));
-                barre.setFont(new Font("Monospaced", Font.PLAIN, 11));
-                JPanel panneauBarre = new JPanel(new BorderLayout());
-                panneauBarre.setBackground(new Color(40, 40, 40));
-                panneauBarre.setBorder(BorderFactory.createEmptyBorder(5, 15, 10, 15));
-                panneauBarre.add(barre, BorderLayout.CENTER);
-                dialog.add(panneauBarre, BorderLayout.CENTER);
-
-                // Timer : 100 ticks, chacun espacé de delaiParTick millisecondes
-                final int[] avancement = {0};
-                Timer timer = new Timer(delaiParTick, null);
-                timer.addActionListener(e -> {
-                    avancement[0]++;
-                    barre.setValue(avancement[0]);
-                    if (avancement[0] >= 100) {
-                        timer.stop();
-                        dialog.dispose();
-                    }
+            Runnable r = () -> {
+                JPasswordField pf = new JPasswordField(20);
+                pf.setFont(Styles.FONT_BODY);
+                JPanel panel = new JPanel(new BorderLayout(0, 8));
+                panel.add(new JLabel(message), BorderLayout.NORTH);
+                panel.add(pf, BorderLayout.CENTER);
+                // Focus automatique sur le champ de saisie quand le dialog s'affiche
+                pf.addAncestorListener(new javax.swing.event.AncestorListener() {
+                    @Override public void ancestorAdded(javax.swing.event.AncestorEvent e) { pf.requestFocusInWindow(); }
+                    @Override public void ancestorMoved(javax.swing.event.AncestorEvent e) {}
+                    @Override public void ancestorRemoved(javax.swing.event.AncestorEvent e) {}
                 });
-                timer.start();
-                dialog.setVisible(true); // boucle imbriquée sur l'EDT jusqu'à dispose()
-            });
-        } catch (InterruptedException | java.lang.reflect.InvocationTargetException ignored) {}
+                int reponse = JOptionPane.showConfirmDialog(
+                        fenetre, panel, titre,
+                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                if (reponse == JOptionPane.OK_OPTION) {
+                    resultat[0] = new String(pf.getPassword());
+                }
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                r.run();
+            } else {
+                SwingUtilities.invokeAndWait(r);
+            }
+        } catch (Exception ignored) {}
+        return resultat[0];
     }
 
-    // ==================== NOTES ====================
+    /** Affiche un message d'information (non-bloquant). */
+    private void showInfo(String titre, String message, int messageType) {
+        runOnEdt(() -> JOptionPane.showMessageDialog(fenetre, message, titre, messageType));
+    }
 
-    @Override
-    public void afficherNoteMorceau(double moyenne, int nbVotes) {
-        if (nbVotes == 0) {
-            afficher("  Note : Aucune note pour l'instant.");
-        } else {
-            StringBuilder etoiles = new StringBuilder();
-            int pleines = (int) Math.round(moyenne);
-            for (int i = 1; i <= 5; i++) etoiles.append(i <= pleines ? "★" : "☆");
-            afficher(String.format("  Note : %s  %.1f/5 (%d vote%s)",
-                    etoiles, moyenne, nbVotes, nbVotes > 1 ? "s" : ""));
+    /** Affiche un message d'information (icône info). */
+    private void showInfo(String message) {
+        showInfo("Information", message, JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** Affiche un message d'erreur (icône erreur). */
+    private void showError(String message) {
+        showInfo("Erreur", message, JOptionPane.ERROR_MESSAGE);
+    }
+
+    // ==================== FRAMEWORK DE SAISIE UTILISATEUR ====================
+
+    /**
+     * Requête de saisie : représente une attente de valeur depuis l'UI.
+     *
+     * Le thread appelant (contrôleur) crée une InputRequest et appelle
+     * {@code await()} pour bloquer. L'EDT appelle {@code submit(val)}
+     * quand l'utilisateur a fourni sa réponse.
+     *
+     * Pour les menus sidebar, la requête connait la correspondance
+     * "clé sidebar → valeur à retourner" (map key → T).
+     */
+    private static class InputRequest<T> {
+        private final SynchronousQueue<Object> queue = new SynchronousQueue<>();
+        private final java.util.Map<String, T> mapping;
+        private final T defaultValue;
+        /** Sentinel non-null pour représenter une "annulation" dans la queue. */
+        private static final Object CANCEL = new Object();
+
+        /** Pour les menus : keyArmée → valeur à retourner, + valeur par défaut si cancel. */
+        InputRequest(java.util.Map<String, T> mapping, T defaultValue) {
+            this.mapping = mapping;
+            this.defaultValue = defaultValue;
         }
-    }
 
-    @Override
-    public int proposerNotation(int noteActuelle) {
-        if (noteActuelle > 0) {
-            return afficherMenuBoutons("Notation",
-                    "Modifier ma note (" + noteActuelle + "/5)", "Passer");
-        } else {
-            return afficherMenuBoutons("Notation", "Noter ce morceau (1 à 5)", "Passer");
+        /** Vrai si cette clé sidebar est armée pour répondre à la saisie. */
+        boolean acceptsSidebarKey(String key) {
+            return key != null && mapping.containsKey(key);
         }
-    }
 
-    @Override
-    public int demanderNote() {
-        afficher("Votre note (1 à 5) :");
-        while (true) {
-            int note = lireEntier();
-            if (note >= 1 && note <= 5) return note;
-            afficher("⚠ Note invalide, entrez un chiffre entre 1 et 5.");
+        /** Appelé depuis l'EDT quand l'utilisateur clique sur un bouton armé. */
+        void submitForKey(String key) {
+            T val = mapping.get(key);
+            if (val != null) {
+                try { queue.put(val); } catch (InterruptedException ignored) {}
+            }
         }
-    }
 
-    @Override
-    public void afficherNoteEnregistree(int note) {
-        StringBuilder etoiles = new StringBuilder();
-        for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "★" : "☆");
-        afficher("  Note enregistrée : " + etoiles + " (" + note + "/5)");
-    }
+        /** Appelé depuis l'EDT si la fenêtre se ferme pendant l'attente. */
+        void cancelWithDefault() {
+            try { queue.put(CANCEL); } catch (InterruptedException ignored) {}
+        }
 
-    // ==================== PLAYLISTS ====================
-
-    @Override
-    public int afficherMenuPlaylist() {
-        return afficherMenuBoutons("Playlists",
-                "Créer une playlist", "Voir mes playlists",
-                "Ajouter un morceau", "Retirer un morceau",
-                "Écouter une playlist", "Renommer une playlist",
-                "Supprimer une playlist", "Retour");
-    }
-
-    @Override
-    public String demanderNomPlaylist() { afficher("Nom de la playlist :"); return lireLigne(); }
-    @Override
-    public String demanderNouveauNomPlaylist() { afficher("Nouveau nom :"); return lireLigne(); }
-    @Override
-    public int demanderIdPlaylist() { afficher("ID de la playlist :"); return lireEntier(); }
-    @Override
-    public int demanderIdMorceau() { afficher("ID du morceau :"); return lireEntier(); }
-
-    @Override
-    public void afficherPlaylistCreee(int id, String nom) { afficher("✅ Playlist \"" + nom + "\" créée (ID:" + id + ")"); }
-    @Override
-    public void afficherPlaylistRenommee(String ancienNom, String nouveauNom) { afficher("✅ \"" + ancienNom + "\" → \"" + nouveauNom + "\""); }
-
-    @Override
-    public void afficherListePlaylists(List<Playlist> playlists) {
-        if (playlists.isEmpty()) { afficher("Aucune playlist."); return; }
-        afficher("\n--- Vos playlists ---");
-        for (Playlist p : playlists) afficher("  " + p);
-    }
-
-    @Override
-    public void afficherContenuPlaylist(Playlist playlist) {
-        afficher("\n--- " + playlist.getNom() + " ---");
-        List<Morceau> morceaux = playlist.getMorceaux();
-        if (morceaux.isEmpty()) { afficher("  (vide)"); return; }
-        int n = 1;
-        for (Morceau m : morceaux)
-            afficher("  " + n++ + ". " + m.getTitre() + " - " + m.getNomInterprete() + " (" + m.getDureeFormatee() + ")");
-        afficher("  Durée totale : " + playlist.getDureeTotaleFormatee());
-    }
-
-    @Override
-    public void afficherMorceauAjoutePlaylist(String titre, String nomPlaylist) { afficher("✅ \"" + titre + "\" ajouté à \"" + nomPlaylist + "\""); }
-    @Override
-    public void afficherMorceauDejaPresent() { afficher("⚠ Déjà dans la playlist."); }
-    @Override
-    public void afficherMorceauRetire() { afficher("✅ Morceau retiré."); }
-    @Override
-    public void afficherPlaylistSupprimee(String nom) { afficher("✅ Playlist \"" + nom + "\" supprimée."); }
-    @Override
-    public void afficherPlaylistIntrouvable() { afficher("❌ Playlist introuvable."); }
-    @Override
-    public void afficherLecturePlaylist(String nom) { afficher("\n▶ Lecture : " + nom); }
-    @Override
-    public void afficherFinPlaylist(String nom) { afficher("⏹ Fin : " + nom); }
-    @Override
-    public void afficherPlaylistVide() { afficher("⚠ Playlist vide."); }
-
-    @Override
-    public void afficherPochette(int position, int total, Morceau m) {
-        afficher("\n  ♪ " + position + "/" + total + " — " + m.getTitre() + " - " + m.getNomInterprete()
-                + " | " + m.getGenre() + " | " + m.getDureeFormatee());
+        /**
+         * Bloque le thread appelant jusqu'à réception d'une valeur.
+         * Retourne defaultValue en cas d'annulation ou d'interruption.
+         */
+        @SuppressWarnings("unchecked")
+        T await() {
+            try {
+                Object o = queue.take();
+                if (o == CANCEL) return defaultValue;
+                return (T) o;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return defaultValue;
+            }
+        }
     }
 
     /**
-     * Affiche les contrôles du lecteur de playlist.
-     * Construit dynamiquement la liste des boutons visibles et retourne le code
-     * correspondant attendu par le contrôleur : 1=Précédent, 2=Suivant, 3=Arrêter.
+     * Construit une requête de menu sidebar et bloque jusqu'au choix.
+     * Doit être appelée depuis le thread contrôleur, jamais l'EDT.
      */
-    @Override
-    public int afficherControlesLecteur(boolean peutReculer, boolean peutAvancer) {
-        List<String> opts  = new ArrayList<>();
-        List<Integer> codes = new ArrayList<>();
-
-        if (peutReculer) { opts.add("◀ Précédent"); codes.add(1); }
-        if (peutAvancer) { opts.add("▶ Suivant");   codes.add(2); }
-        opts.add("⏹ Arrêter");                       codes.add(3);
-
-        int idx = afficherMenuBoutons("Lecteur", opts.toArray(new String[0]));
-        return codes.get(idx - 1);
+    private <T> T awaitSidebarChoice(java.util.Map<String, T> mapping, T defaultValue) {
+        InputRequest<T> req = new InputRequest<>(mapping, defaultValue);
+        requeteCourante.set(req);
+        runOnEdt(this::refreshSidebarButtonsState);
+        try {
+            return req.await();
+        } finally {
+            requeteCourante.set(null);
+            runOnEdt(this::refreshSidebarButtonsState);
+        }
     }
 
-    // ==================== HISTORIQUE ====================
+    // ==================== CLASSE INTERNE : BOUTON SIDEBAR ====================
 
-    @Override
-    public void afficherHistorique(List<Historique> historique) {
-        afficher("\n========== HISTORIQUE ==========");
-        if (historique.isEmpty()) { afficher("  (aucun)"); }
-        else { int n = 1; for (Historique h : historique) afficher("  " + n++ + ". " + h); }
-        afficher("=================================");
+    private static class SidebarButton extends JButton {
+        private static final long serialVersionUID = 1L;
+        private final String actionKey;
+        private boolean active = false;
+
+        SidebarButton(String text, String actionKey) {
+            super(text);
+            this.actionKey = actionKey;
+            setFont(Styles.FONT_SIDEBAR);
+            setForeground(Styles.TEXT_ON_TEAL);
+            setBackground(Styles.TEAL);
+            setHorizontalAlignment(SwingConstants.LEFT);
+            setFocusPainted(false);
+            setBorderPainted(false);
+            setContentAreaFilled(true);
+            setOpaque(true);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setBorder(new EmptyBorder(10, Styles.PADDING_LG, 10, Styles.PADDING_LG));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+            setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                    if (isEnabled() && !active) setBackground(Styles.TEAL_DARK);
+                }
+                @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                    if (isEnabled() && !active) setBackground(Styles.TEAL);
+                }
+            });
+        }
+
+        String getActionKey() { return actionKey; }
+
+        void setActive(boolean a) {
+            this.active = a;
+            if (isEnabled()) {
+                setBackground(a ? Styles.TEAL_LIGHT : Styles.TEAL);
+            }
+            setFont(a ? Styles.FONT_SIDEBAR.deriveFont(Font.BOLD) : Styles.FONT_SIDEBAR);
+        }
+
+        @Override public void setEnabled(boolean enabled) {
+            super.setEnabled(enabled);
+            if (!enabled) {
+                // Bouton désactivé : style estompé, curseur normal
+                setBackground(Styles.TEAL);
+                setForeground(new Color(255, 255, 255, 110));
+                setCursor(Cursor.getDefaultCursor());
+            } else {
+                setForeground(Styles.TEXT_ON_TEAL);
+                setBackground(active ? Styles.TEAL_LIGHT : Styles.TEAL);
+                setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            }
+        }
+
+        void markAsFooter() { /* réservé pour polish */ }
     }
 
-    // ==================== DIVERS ====================
+    // ==================== SURCHARGES VueConsole ====================
 
-    @Override
-    public void afficherChoixInvalide() { afficher("⚠ Choix invalide."); }
-    @Override
-    public void afficherRetourMenuPrincipal() { afficher("↩ Retour au menu principal."); }
-    @Override
-    public void afficherErreurId() { afficher("❌ ID invalide ou introuvable."); }
-    @Override
-    public void afficherMessage(String message) { afficher(message); }
+    @Override public void afficherBienvenue() { /* affiché via accueil card */ }
+
+    /**
+     * Menu principal : réinitialise l'état DECONNECTE, affiche la carte
+     * accueil, arme les 5 boutons sidebar correspondants puis bloque
+     * jusqu'au clic utilisateur.
+     *
+     * La préparation de l'UI est faite en {@code invokeAndWait} pour
+     * garantir que tout est en place AVANT qu'on n'arme la requête
+     * et qu'on ne bloque le thread contrôleur. Ça évite toute race
+     * avec un clic qui arriverait trop tôt.
+     */
+    @Override public int afficherMenuPrincipal() {
+        // Étape 1 : préparer l'UI de manière SYNCHRONE sur l'EDT
+        try {
+            if (SwingUtilities.isEventDispatchThread()) {
+                resetToAccueilDeconnecte();
+            } else {
+                SwingUtilities.invokeAndWait(this::resetToAccueilDeconnecte);
+            }
+        } catch (Exception ignored) {}
+
+        // Étape 2 : construire la requête et bloquer
+        java.util.Map<String, Integer> mapping = new java.util.HashMap<>();
+        mapping.put("connexionAdmin",  1);
+        mapping.put("connexionClient", 2);
+        mapping.put("inscription",     3);
+        mapping.put("visiteurAction",  4);
+        mapping.put("quitter",         5);
+
+        return awaitSidebarChoice(mapping, 5);
+    }
+
+    /** Réinitialise la sidebar et affiche la carte accueil. À appeler sur l'EDT. */
+    private void resetToAccueilDeconnecte() {
+        sessionState = SessionState.DECONNECTE;
+        nomUtilisateur = null;
+        cardCourante = "accueil";
+        rebuildSidebar();
+        contentLayout.show(contentPanel, "accueil");
+    }
+
+    // Les autres menus sont encore stubés et retournent "retour menu principal".
+    // Ils seront câblés aux étapes 5/6/7.
+    @Override public int afficherMenuAdmin()      { return 13; }
+    @Override public int afficherMenuClient()     { return 5;  }
+    @Override public int afficherMenuVisiteur()   { return 3;  }
+    @Override public int afficherMenuCatalogue()  { return 7;  }
+
+    @Override public String demanderRecherche()   { return ""; }
+    @Override public String demanderMail()         { return promptText("Adresse e-mail", "Saisissez votre e-mail :"); }
+    @Override public String demanderMdp()          { return promptPassword("Mot de passe", "Saisissez votre mot de passe :"); }
+    @Override public String demanderNom()          { return promptText("Inscription (1/4)", "Nom :"); }
+    @Override public String demanderPrenom()       { return promptText("Inscription (2/4)", "Prénom :"); }
+    @Override public String demanderEmail()        { return promptText("Inscription (3/4)", "Adresse e-mail :"); }
+    @Override public String demanderMotDePasse()   { return promptPassword("Inscription (4/4)", "Choisissez un mot de passe :"); }
+
+    @Override public void afficherResultatsRecherche(Catalogue.ResultatRecherche r) { }
+    @Override public void afficherDetailsMorceau(Morceau m)                         { }
+    @Override public void afficherDetailsAlbum(Album a)                             { }
+    @Override public void afficherDetailsArtiste(Artiste a)                         { }
+    @Override public void afficherDetailsGroupe(Groupe g)                           { }
+    @Override public void afficherListeMorceaux(List<Morceau> morceaux)             { }
+    @Override public void afficherListeAlbums(List<Album> albums)                   { }
+    @Override public void afficherListeArtistes(List<Artiste> artistes)             { }
+    @Override public void afficherListeGroupes(List<Groupe> groupes)                { }
+
+    @Override public int afficherMenuNavigation() { return 5; }
+    @Override public int demanderIdElement()      { return -1; }
+
+    @Override public void afficherMessage(String message) {
+        // Le contrôleur appelle afficherMessage("Merci d'avoir utilise Javazik...")
+        // comme dernier acte avant de se terminer : on ferme la fenêtre.
+        if (message != null && message.startsWith("Merci d'avoir utilise")) {
+            runOnEdt(() -> {
+                fenetre.dispose();
+                System.exit(0);
+            });
+            return;
+        }
+        // Tout autre message (erreur, info ponctuelle) : dialog d'info.
+        if (message != null && !message.isEmpty()) {
+            showInfo(message);
+        }
+    }
+    @Override public void afficherChoixInvalide()      { showError("Choix invalide."); }
+    @Override public void afficherConnexionReussie()   { showInfo("Connexion réussie."); }
+    @Override public void afficherMdpIncorrect()       { showError("Mot de passe incorrect."); }
+    @Override public void afficherMailIncorrect()      { showError("Adresse e-mail inconnue."); }
+    @Override public void afficherPasAdmin()           { showError("Ce compte n'est pas administrateur."); }
+    @Override public void afficherInscriptionReussie() { showInfo("Votre compte a été créé avec succès."); }
+
+    // Admin
+    @Override public String demanderTitreMorceau()      { return ""; }
+    @Override public int    demanderDureeMorceau()      { return 0; }
+    @Override public String demanderGenreMorceau()      { return ""; }
+    @Override public int    demanderAnneeMorceau()      { return 0; }
+    @Override public int    demanderIdArtisteMorceau()  { return 0; }
+    @Override public int    demanderIdGroupeMorceau()   { return 0; }
+    @Override public void   afficherMorceauAjoute(int id) { }
+    @Override public int    demanderIdSuppression()     { return -1; }
+    @Override public void   afficherElementSupprime(String type)                { }
+    @Override public void   afficherElementNonTrouve(String type, int id)       { }
 }

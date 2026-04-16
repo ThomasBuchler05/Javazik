@@ -51,7 +51,10 @@ public class Utilisateur {
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
             String ligne;
             while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
+                // Ligne malformée (moins de 5 champs) : on l'ignore
+                if (parts.length < 5) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
@@ -83,7 +86,10 @@ public class Utilisateur {
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
             String ligne;
             while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
+                // Ligne malformée (moins de 6 champs : pas de flag admin) : on l'ignore
+                if (parts.length < 6) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
