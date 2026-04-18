@@ -891,4 +891,10 @@ public class VueConsole {
     public void afficherMessage(String message) {
         System.out.println(message);
     }
+
+    // ==================== NOTIFICATIONS DE SESSION (override dans VueGraphique) ====================
+
+    public void notifierSessionAdmin(String nom)  { /* no-op console */ }
+    public void notifierSessionClient(String nom) { /* no-op console */ }
+    public void notifierSessionVisiteur()         { /* no-op console */ }
 }

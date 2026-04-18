@@ -59,6 +59,7 @@ public class ControleurPrincipal {
             }
             if (utilisateur.verifierMdp(mdpSaisi)) {
                 vue.afficherConnexionReussie();
+                vue.notifierSessionAdmin(utilisateur.getNOM());
                 menuAdmin();
             } else {
                 vue.afficherMessage("Trop de tentatives, retour au menu principal.");
@@ -86,6 +87,7 @@ public class ControleurPrincipal {
             }
             if (utilisateur.verifierMdp(mdpSaisi)) {
                 vue.afficherConnexionReussie();
+                vue.notifierSessionClient(utilisateur.getNOM());
                 menuClient();
             } else {
                 vue.afficherMessage("Trop de tentatives, retour au menu principal.");
@@ -396,6 +398,7 @@ public class ControleurPrincipal {
     // ==================== MENU VISITEUR ====================
 
     private void menuVisiteur() {
+        vue.notifierSessionVisiteur();
         int choix;
         do {
             choix = vue.afficherMenuVisiteur();
