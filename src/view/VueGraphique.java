@@ -313,8 +313,14 @@ public final class VueGraphique extends VueConsole {
                 try { adminQueue.put("statistiques"); } catch (InterruptedException ignored) {}
                 return;
             }
+            if (actionKey.equals("accueil")) {
+                showCard("accueil");
+                catalogueIntQueue.offer(7); // débloquer si bloqué dans menuCatalogue
+                return;
+            }
             if (actionKey.equals("catalogue")) {
                 showCard("catalogue");
+                catalogueIntQueue.offer(7); // débloquer si déjà bloqué dans menuCatalogue
                 try { adminQueue.put("catalogue"); } catch (InterruptedException ignored) {}
                 return;
             }
@@ -847,13 +853,48 @@ public final class VueGraphique extends VueConsole {
         // Les autres filtres : 2=morceaux, 3=albums, 4=artistes, 5=groupes
         String[] filtres   = {"Tout",  "Morceaux", "Albums", "Artistes", "Groupes"};
         int[]    filtreIds = {100,     2,           3,        4,          5};
+        List<JButton> filtreButtons = new ArrayList<>();
         for (int i = 0; i < filtres.length; i++) {
             final int filtreId = filtreIds[i];
-            JButton fb = Styles.secondaryButton(filtres[i]);
+            final int fi = i;
+            JButton fb = new JButton(filtres[i]) {
+                @Override public void updateUI() { super.updateUI(); setOpaque(true); setBorderPainted(true); }
+            };
             fb.setFont(Styles.FONT_SMALL);
+            fb.setFocusPainted(false);
+            fb.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            fb.setBackground(Styles.BG_MAIN);
+            fb.setForeground(Styles.TEAL);
+            fb.setOpaque(true);
+            fb.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                    BorderFactory.createEmptyBorder(5, 14, 5, 14)));
+            fb.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                    if (!fb.getBackground().equals(Styles.TEAL)) {
+                        fb.setBackground(Styles.TEAL_SURFACE);
+                    }
+                }
+                @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                    if (!fb.getBackground().equals(Styles.TEAL)) {
+                        fb.setBackground(Styles.BG_MAIN);
+                    }
+                }
+            });
             fb.addActionListener(e -> {
+                for (int j = 0; j < filtreButtons.size(); j++) {
+                    JButton btn = filtreButtons.get(j);
+                    if (j == fi) {
+                        btn.setBackground(Styles.TEAL);
+                        btn.setForeground(Styles.TEXT_ON_TEAL);
+                    } else {
+                        btn.setBackground(Styles.BG_MAIN);
+                        btn.setForeground(Styles.TEAL);
+                    }
+                }
                 try { catalogueIntQueue.put(filtreId); } catch (InterruptedException ignored) {}
             });
+            filtreButtons.add(fb);
             filterBar.add(fb);
         }
         topBar.add(filterBar);
@@ -928,12 +969,23 @@ public final class VueGraphique extends VueConsole {
                     BorderFactory.createEmptyBorder(10, 14, 10, 14)));
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            // Hover effect
+            row.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                    row.setBackground(Styles.TEAL_SURFACE);
+                    row.repaint();
+                }
+                @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                    row.setBackground(Styles.BG_ALT);
+                    row.repaint();
+                }
+            });
 
             JLabel lbl = Styles.bodyLabel(toLabel.apply(item));
             row.add(lbl, BorderLayout.CENTER);
 
             if (typeCode > 0) {
-                JButton btnDetail = Styles.secondaryButton("D\u00e9tails");
+                JButton btnDetail = Styles.secondaryButton("D\u00e9tails \u203a");
                 btnDetail.setFont(Styles.FONT_SMALL);
                 int encoded = typeCode * 1_000_000 + toId.apply(item);
                 btnDetail.addActionListener(e -> {
@@ -965,6 +1017,21 @@ public final class VueGraphique extends VueConsole {
         JPanel p = new JPanel();
         p.setBackground(Styles.BG_MAIN);
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+
+        // Bouton retour
+        JButton btnBack = Styles.secondaryButton("\u2190 Retour");
+        btnBack.setFont(Styles.FONT_SMALL);
+        btnBack.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnBack.setMaximumSize(new Dimension(120, 34));
+        btnBack.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.BORDER, 1, true),
+                BorderFactory.createEmptyBorder(6, 14, 6, 14)));
+        btnBack.setForeground(Styles.TEXT_MUTED);
+        btnBack.addActionListener(e -> {
+            try { catalogueIntQueue.put(5); } catch (InterruptedException ignored) {}
+        });
+        p.add(btnBack);
+        p.add(Box.createVerticalStrut(Styles.PADDING_MD));
 
         JLabel t = Styles.titleLabel(titre);
         t.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1093,6 +1160,14 @@ public final class VueGraphique extends VueConsole {
         row.setLayout(new BorderLayout(Styles.PADDING_MD, 0));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
+        row.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                row.setBackground(Styles.TEAL_SURFACE);
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                row.setBackground(Styles.BG_ALT);
+            }
+        });
 
         // Infos
         JPanel info = new JPanel();
@@ -1302,8 +1377,10 @@ public final class VueGraphique extends VueConsole {
     // ==================== CARTES ADMIN ====================
 
     // Queue partagée pour toutes les saisies admin (bloquantes, séquentielles)
-    private final java.util.concurrent.SynchronousQueue<Object> adminQueue =
-            new java.util.concurrent.SynchronousQueue<>();
+    // LinkedBlockingQueue : le put() depuis l'EDT (sidebar) ne bloque jamais,
+    // même si le thread contrôleur n'est pas encore en train de faire un take().
+    private final java.util.concurrent.LinkedBlockingQueue<Object> adminQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
 
     // Références aux composants mis à jour dynamiquement
     private JPanel adminCatalogueContent;
@@ -1486,6 +1563,10 @@ public final class VueGraphique extends VueConsole {
                             BorderFactory.createEmptyBorder(8, 14, 8, 14)));
                     row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    row.addMouseListener(new java.awt.event.MouseAdapter() {
+                        @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
+                        @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(Styles.BG_ALT); }
+                    });
 
                     row.add(new JLabel(id));
                     row.add(Styles.bodyLabel(nom));
@@ -2037,12 +2118,26 @@ public final class VueGraphique extends VueConsole {
 
         try {
             while (true) {
-                int v = catalogueIntQueue.take();
-                if (v == 100) {
-                    SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
-                    return 1;
+                // Poll avec timeout : permet de détecter un clic sidebar admin même sans filtre
+                Integer v = catalogueIntQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+                if (v != null) {
+                    if (v == 7) { return 7; } // signal de sortie admin
+                    if (v == 100) {
+                        SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
+                        return 1;
+                    }
+                    return v;
                 }
-                return v;
+
+                // Pas de filtre : vérifier si la sidebar admin a envoyé un ordre (ex: déconnexion)
+                if (sessionState == SessionState.ADMIN) {
+                    Object ao = adminQueue.poll();
+                    if (ao != null) {
+                        adminQueue.put(ao); // remettre pour afficherMenuAdmin()
+                        return 7; // sortir de menuCatalogue()
+                    }
+                }
             }
         } catch (InterruptedException e) { return 7; }
     }
@@ -2063,19 +2158,36 @@ public final class VueGraphique extends VueConsole {
     @Override public int afficherMenuNavigation() {
         try {
             while (true) {
-                int v = catalogueIntQueue.take();
-                if (v >= 1_000_000) {
-                    // Encodage : type*1000000 + id → clic "Détails"
-                    dernierTypeNav = v / 1_000_000;
-                    dernierIdNav   = v % 1_000_000;
-                    return dernierTypeNav;
+                // Poll avec timeout court pour ne pas bloquer à jamais
+                Integer v = catalogueIntQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+                if (v != null) {
+                    if (v >= 1_000_000) {
+                        // Encodage : type*1000000 + id → clic "Détails"
+                        dernierTypeNav = v / 1_000_000;
+                        dernierIdNav   = v % 1_000_000;
+                        return dernierTypeNav;
+                    }
+                    if (v == 7) {
+                        // Signal de sortie injecté par la sidebar admin
+                        return 5;
+                    }
+                    // Bouton filtre cliqué pendant la navigation
+                    catalogueFiltreEnAttente = v;
+                    catalogueIntQueue.clear();
+                    return 5;
                 }
-                // Valeur filtre (1-7) ou "Tout" (100) : l'utilisateur a cliqué
-                // un bouton de filtre pendant la navigation → mémoriser et sortir
-                // proprement sans remettre dans la queue (évite la boucle infinie)
-                catalogueFiltreEnAttente = v;
-                catalogueIntQueue.clear(); // vider les doublons éventuels
-                return 5; // retour = sortir de naviguer()
+
+                // Rien dans catalogueIntQueue : vérifier si la sidebar admin a produit un ordre
+                if (sessionState == SessionState.ADMIN) {
+                    Object ao = adminQueue.poll();
+                    if (ao != null) {
+                        // Remettre l'ordre pour que afficherMenuAdmin() le consomme normalement
+                        adminQueue.put(ao);
+                        catalogueIntQueue.clear();
+                        return 5; // sortir de naviguer()
+                    }
+                }
             }
         } catch (InterruptedException e) { return 5; }
     }
@@ -2091,13 +2203,13 @@ public final class VueGraphique extends VueConsole {
             JPanel p = new JPanel();
             p.setBackground(Styles.BG_MAIN);
             p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-            p.add(buildListPanel("Morceaux", r.morceaux,
+            p.add(buildListPanel("Morceaux (" + r.morceaux.size() + ")", r.morceaux,
                     m -> m.getTitre() + " \u2014 " + m.getNomInterprete() + " (" + m.getAnnee() + ")",
-                    Morceau::getId));
+                    Morceau::getId, 1));
             p.add(Box.createVerticalStrut(Styles.PADDING_MD));
-            p.add(buildListPanel("Albums", r.albums,
+            p.add(buildListPanel("Albums (" + r.albums.size() + ")", r.albums,
                     a -> a.getTitre() + " \u2014 " + a.getNomInterprete() + " (" + a.getAnnee() + ")",
-                    Album::getId));
+                    Album::getId, 2));
             p.add(Box.createVerticalStrut(Styles.PADDING_MD));
             p.add(buildListPanel("Artistes (" + r.artistes.size() + ")", r.artistes,
                     a -> a.getNomComplet(), Artiste::getId, 3));
@@ -2111,23 +2223,23 @@ public final class VueGraphique extends VueConsole {
     @Override public void afficherListeMorceaux(List<Morceau> l) {
         runOnEdt(() -> setCatalogueContent(buildListPanel("Morceaux (" + l.size() + ")", l,
                 m -> m.getTitre() + " \u2014 " + m.getNomInterprete() + " (" + m.getDureeFormatee() + ")",
-                Morceau::getId)));
+                Morceau::getId, 1)));
     }
 
     @Override public void afficherListeAlbums(List<Album> l) {
         runOnEdt(() -> setCatalogueContent(buildListPanel("Albums (" + l.size() + ")", l,
                 a -> a.getTitre() + " \u2014 " + a.getNomInterprete() + " (" + a.getAnnee() + ")",
-                Album::getId)));
+                Album::getId, 2)));
     }
 
     @Override public void afficherListeArtistes(List<Artiste> l) {
         runOnEdt(() -> setCatalogueContent(buildListPanel("Artistes (" + l.size() + ")", l,
-                a -> a.getNomComplet() + "  \u2022  " + a.getNationalite(), Artiste::getId)));
+                a -> a.getNomComplet() + "  \u2022  " + a.getNationalite(), Artiste::getId, 3)));
     }
 
     @Override public void afficherListeGroupes(List<Groupe> l) {
         runOnEdt(() -> setCatalogueContent(buildListPanel("Groupes (" + l.size() + ")", l,
-                g -> g.getNom() + "  \u2022  " + g.getNationalite(), Groupe::getId)));
+                g -> g.getNom() + "  \u2022  " + g.getNationalite(), Groupe::getId, 4)));
     }
 
     @Override public void afficherDetailsMorceau(Morceau m) {
@@ -2540,6 +2652,10 @@ public final class VueGraphique extends VueConsole {
                             BorderFactory.createEmptyBorder(10, 14, 10, 14)));
                     row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    row.addMouseListener(new java.awt.event.MouseAdapter() {
+                        @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
+                        @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(Styles.BG_ALT); }
+                    });
 
                     JLabel lbl = Styles.bodyLabel(m.getTitre() + " \u2014 " + m.getNomInterprete()
                             + "  \u2022  " + m.getDureeFormatee());
@@ -2668,8 +2784,13 @@ public final class VueGraphique extends VueConsole {
                 // Lignes
                 for (int i = 0; i < historique.size(); i++) {
                     model.Historique h = historique.get(i);
+                    final Color rowBg = (i % 2 == 0) ? Styles.BG_MAIN : Styles.BG_ALT;
                     JPanel row = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
-                    row.setBackground(i % 2 == 0 ? Styles.BG_MAIN : Styles.BG_ALT);
+                    row.setBackground(rowBg);
+                    row.addMouseListener(new java.awt.event.MouseAdapter() {
+                        @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
+                        @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(rowBg); }
+                    });
                     row.setBorder(BorderFactory.createCompoundBorder(
                             BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
                             BorderFactory.createEmptyBorder(10, 14, 10, 14)));

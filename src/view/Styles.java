@@ -50,6 +50,7 @@ public final class Styles {
     public static final Font FONT_BODY       = new Font(FAMILY, Font.PLAIN, 14);
     public static final Font FONT_BODY_BOLD  = new Font(FAMILY, Font.BOLD,  14);
     public static final Font FONT_SMALL      = new Font(FAMILY, Font.PLAIN, 12);
+    public static final Font FONT_SMALL_BOLD  = new Font(FAMILY, Font.BOLD,  12);
     public static final Font FONT_BUTTON     = new Font(FAMILY, Font.BOLD,  14);
     public static final Font FONT_SIDEBAR    = new Font(FAMILY, Font.PLAIN, 14);
     public static final Font FONT_LOGO       = new Font(FAMILY, Font.BOLD,  22);
@@ -86,11 +87,20 @@ public final class Styles {
         JButton b = baseButton(text);
         b.setBackground(BG_MAIN);
         b.setForeground(TEAL);
+        b.setOpaque(true);
         b.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(TEAL, 1, true),
                 BorderFactory.createEmptyBorder(8, 18, 8, 18)
         ));
         b.setContentAreaFilled(true);
+        b.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (b.isEnabled()) { b.setBackground(TEAL_SURFACE); }
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                if (b.isEnabled()) { b.setBackground(BG_MAIN); }
+            }
+        });
         return b;
     }
 
@@ -164,10 +174,35 @@ public final class Styles {
         JPanel p = new JPanel();
         p.setBackground(BG_ALT);
         p.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER, 1, true),
+                BorderFactory.createLineBorder(new Color(214, 219, 227), 1, true),
                 BorderFactory.createEmptyBorder(PADDING_MD, PADDING_MD, PADDING_MD, PADDING_MD)
         ));
         return p;
+    }
+
+    /**
+     * Bouton "lien" sans fond ni bordure : texte teal souligné au survol.
+     * Utile pour les actions secondaires discrètes.
+     */
+    public static JButton linkButton(String text) {
+        JButton b = new JButton(text);
+        b.setFont(FONT_SMALL);
+        b.setForeground(TEAL);
+        b.setBackground(null);
+        b.setOpaque(false);
+        b.setBorderPainted(false);
+        b.setContentAreaFilled(false);
+        b.setFocusPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                b.setForeground(TEAL_DARK);
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                b.setForeground(TEAL);
+            }
+        });
+        return b;
     }
 
     /** Séparateur horizontal fin pour la sidebar. */
