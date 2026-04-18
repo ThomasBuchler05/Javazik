@@ -299,23 +299,34 @@ public final class VueGraphique extends VueConsole {
             return;
         }
 
-        // Sidebar admin : les clics "Gérer les comptes" et "Statistiques"
-        // doivent aussi pousser dans adminQueue pour débloquer afficherMenuAdmin()
+        // Sidebar admin : les clics doivent pousser dans adminQueue pour débloquer afficherMenuAdmin()
         if (sessionState == SessionState.ADMIN) {
             if (actionKey.equals("gestionComptes")) {
                 showCard("gestionComptes");
+                catalogueIntQueue.offer(7); // débloquer si on était dans menuCatalogue
                 try { adminQueue.put("gererComptes"); } catch (InterruptedException ignored) {}
                 return;
             }
             if (actionKey.equals("statistiques")) {
                 showCard("statistiques");
+                catalogueIntQueue.offer(7);
                 try { adminQueue.put("statistiques"); } catch (InterruptedException ignored) {}
                 return;
             }
+            if (actionKey.equals("catalogue")) {
+                showCard("catalogue");
+                try { adminQueue.put("catalogue"); } catch (InterruptedException ignored) {}
+                return;
+            }
+            if (actionKey.equals("gestionCatalogue")) {
+                showCard("gestionCatalogue");
+                catalogueIntQueue.offer(7);
+                try { adminQueue.put("gestionCatalogue"); } catch (InterruptedException ignored) {}
+                return;
+            }
             if (actionKey.equals("deconnexion")) {
-                // Débloque afficherMenuAdmin() avec retour=13, puis reset
+                catalogueIntQueue.offer(7);
                 try { adminQueue.put("retour"); } catch (InterruptedException ignored) {}
-                // Ne pas showCard ici : le contrôleur rendra la main et resetToAccueil sera appelé
                 return;
             }
         }
@@ -364,29 +375,95 @@ public final class VueGraphique extends VueConsole {
     // ==================== CARTES (placeholders) ====================
 
     private JPanel buildAccueilCard() {
-        JPanel card = new JPanel();
+        JPanel card = new JPanel(new BorderLayout());
         card.setBackground(Styles.BG_MAIN);
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBorder(new EmptyBorder(80, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
-        JLabel titre = Styles.titleLabel("Bienvenue sur JAVAZIK");
-        titre.setFont(Styles.FONT_TITLE.deriveFont(36f));
-        titre.setAlignmentX(Component.LEFT_ALIGNMENT);
+        // Bannière hero avec dégradé teal simulé
+        JPanel hero = new JPanel() {
+            @Override protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                GradientPaint gp = new GradientPaint(0, 0, Styles.TEAL, getWidth(), getHeight(), Styles.TEAL_DARK);
+                g2.setPaint(gp);
+                g2.fillRect(0, 0, getWidth(), getHeight());
+                // Note musicales déco semi-transparentes
+                g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 80));
+                g2.setColor(new Color(255, 255, 255, 25));
+                g2.drawString("\u266B", getWidth() - 160, 100);
+                g2.drawString("\u266A", getWidth() - 280, 60);
+                g2.drawString("\u2669", getWidth() - 60, 140);
+                g2.dispose();
+            }
+        };
+        hero.setLayout(new BoxLayout(hero, BoxLayout.Y_AXIS));
+        hero.setBorder(new EmptyBorder(60, Styles.PADDING_LG * 3, 60, Styles.PADDING_LG * 3));
+        hero.setPreferredSize(new Dimension(0, 220));
 
-        JLabel sousTitre = Styles.mutedLabel("Votre catalogue musical, vos playlists, votre historique d'écoute.");
-        sousTitre.setFont(Styles.FONT_BODY.deriveFont(16f));
-        sousTitre.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel logoLabel = new JLabel("JAVAZIK  \u266A");
+        logoLabel.setFont(Styles.FONT_LOGO.deriveFont(Font.BOLD, 42f));
+        logoLabel.setForeground(Color.WHITE);
+        logoLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JLabel cta = Styles.bodyLabel("Choisissez une action dans le menu de gauche pour commencer.");
-        cta.setForeground(Styles.TEXT_MUTED);
-        cta.setBorder(new EmptyBorder(Styles.PADDING_LG, 0, 0, 0));
+        JLabel tagline = new JLabel("Votre catalogue musical, vos playlists, votre historique.");
+        tagline.setFont(Styles.FONT_BODY.deriveFont(16f));
+        tagline.setForeground(new Color(255, 255, 255, 210));
+        tagline.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel cta = new JLabel("Choisissez une action dans le menu de gauche pour commencer.");
+        cta.setFont(Styles.FONT_SMALL);
+        cta.setForeground(new Color(255, 255, 255, 160));
         cta.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        card.add(titre);
-        card.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        card.add(sousTitre);
-        card.add(cta);
-        card.add(Box.createVerticalGlue());
+        hero.add(logoLabel);
+        hero.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        hero.add(tagline);
+        hero.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        hero.add(cta);
+
+        card.add(hero, BorderLayout.NORTH);
+
+        // Section features
+        JPanel features = new JPanel(new GridLayout(1, 3, Styles.PADDING_LG, 0));
+        features.setBackground(Styles.BG_MAIN);
+        features.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 3,
+                Styles.PADDING_LG * 2, Styles.PADDING_LG * 3));
+
+        String[][] feats = {
+                {"\uD83D\uDCBF", "Catalogue", "Parcourez morceaux, albums, artistes et groupes."},
+                {"\uD83C\uDFB5", "Écouter", "Lancez la lecture et suivez vos écoutes."},
+                {"\uD83D\uDCCB", "Playlists", "Créez et gérez vos playlists personnalisées."},
+        };
+        for (String[] f : feats) {
+            JPanel tile = new JPanel();
+            tile.setBackground(Styles.BG_ALT);
+            tile.setLayout(new BoxLayout(tile, BoxLayout.Y_AXIS));
+            tile.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Styles.BORDER, 1, true),
+                    BorderFactory.createEmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                            Styles.PADDING_LG, Styles.PADDING_LG)));
+
+            JLabel icon = new JLabel(f[0]);
+            icon.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 32));
+            icon.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JLabel title = new JLabel(f[1]);
+            title.setFont(Styles.FONT_BODY_BOLD);
+            title.setForeground(Styles.TEXT);
+            title.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JLabel desc = Styles.mutedLabel(f[2]);
+            desc.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            tile.add(icon);
+            tile.add(Box.createVerticalStrut(Styles.PADDING_SM));
+            tile.add(title);
+            tile.add(Box.createVerticalStrut(4));
+            tile.add(desc);
+
+            features.add(tile);
+        }
+        card.add(features, BorderLayout.CENTER);
 
         return card;
     }
@@ -723,8 +800,10 @@ public final class VueGraphique extends VueConsole {
     private JTextField      catalogueSearchField;
     private JLabel          catalogueTitleLabel;
     // Queue pour les menus/ID demandés par le contrôleur
-    private final java.util.concurrent.SynchronousQueue<Integer> catalogueIntQueue =
-            new java.util.concurrent.SynchronousQueue<>();
+    private final java.util.concurrent.LinkedBlockingQueue<Integer> catalogueIntQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+    /** Filtre en attente détecté dans naviguer() et à consommer au prochain afficherMenuCatalogue(). */
+    private volatile Integer catalogueFiltreEnAttente = null;
 
     private JPanel buildCatalogueCard() {
         JPanel card = new JPanel(new BorderLayout());
@@ -1230,7 +1309,7 @@ public final class VueGraphique extends VueConsole {
     private JPanel adminCatalogueContent;
     private JPanel adminComptesContent;
     private JLabel adminComptesStatus;
-    private JLabel adminStatsContent;
+    private JPanel adminStatsCard;   // le JPanel complet de la carte statistiques
 
     // ---- Carte : Gérer le catalogue ----
     private JPanel buildAdminCatalogueCard() {
@@ -1336,8 +1415,8 @@ public final class VueGraphique extends VueConsole {
 
     // ---- Carte : Statistiques ----
     private JPanel buildAdminStatsCard() {
-        JPanel card = new JPanel(new BorderLayout());
-        card.setBackground(Styles.BG_MAIN);
+        adminStatsCard = new JPanel(new BorderLayout());
+        adminStatsCard.setBackground(Styles.BG_MAIN);
 
         JPanel top = new JPanel();
         top.setBackground(Styles.BG_MAIN);
@@ -1349,14 +1428,12 @@ public final class VueGraphique extends VueConsole {
         top.add(titre);
         top.add(Box.createVerticalStrut(Styles.PADDING_SM));
 
-        adminStatsContent = new JLabel(" ");
-        adminStatsContent.setFont(Styles.FONT_BODY);
-        adminStatsContent.setForeground(Styles.TEXT_MUTED);
-        adminStatsContent.setAlignmentX(Component.LEFT_ALIGNMENT);
-        top.add(adminStatsContent);
-        card.add(top, BorderLayout.NORTH);
+        JLabel sub = Styles.mutedLabel("Chargement des statistiques\u2026");
+        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+        top.add(sub);
 
-        return card;
+        adminStatsCard.add(top, BorderLayout.NORTH);
+        return adminStatsCard;
     }
 
     /** Met à jour la zone feedback du catalogue admin. */
@@ -1734,11 +1811,8 @@ public final class VueGraphique extends VueConsole {
     // ========== MENUS SIDEBAR-DRIVEN ==========
 
     @Override public int afficherMenuAdmin() {
-        // Arme la sidebar + attend un clic sur une action admin
-        // On navigue vers gestionCatalogue par défaut
-        try {
-            SwingUtilities.invokeAndWait(() -> showCard("gestionCatalogue"));
-        } catch (Exception ignored) {}
+        // NE PAS forcer showCard ici : la carte est déjà visible depuis le clic sidebar
+        // (ou depuis la première entrée gérée par notifierSessionAdmin via setSessionState)
         try {
             while (true) {
                 Object o = adminQueue.take();
@@ -1757,9 +1831,13 @@ public final class VueGraphique extends VueConsole {
                     case "gererComptes":        return 11;
                     case "statistiques":        return 12;
                     case "retour":              return 13;
+                    case "catalogue":           return 14;
+                    case "gestionCatalogue":
+                        runOnEdt(() -> showCard("gestionCatalogue"));
+                        // reboucler pour attendre la prochaine action
+                        break;
                     default:
-                        if (s.startsWith("supprimerAbonne:")) return 11; // gestion comptes
-                        // Remettre pour que demanderIdAbonne() consomme
+                        if (s.startsWith("supprimerAbonne:")) return 11;
                         adminQueue.put(o);
                         return 11;
                 }
@@ -1854,39 +1932,65 @@ public final class VueGraphique extends VueConsole {
     @Override public void afficherStatistiques(int nbM, int nbA, int nbAr, int nbG, int nbU, int nbE) {
         runOnEdt(() -> {
             showCard("statistiques");
-            if (adminStatsContent == null) return;
-            adminStatsContent.getParent().removeAll();
+            if (adminStatsCard == null) return;
 
-            JPanel card = adminStatsContent.getParent() instanceof JPanel ? (JPanel) adminStatsContent.getParent() : new JPanel();
+            // Reconstruction complète de la carte
+            adminStatsCard.removeAll();
 
-            // Reconstruire le contenu stats
-            JPanel grid = new JPanel(new GridLayout(0, 2, Styles.PADDING_LG, Styles.PADDING_MD));
+            // En-tête
+            JPanel top = new JPanel();
+            top.setBackground(Styles.BG_MAIN);
+            top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
+            top.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_MD, Styles.PADDING_LG * 2));
+
+            JLabel titre = Styles.titleLabel("Statistiques");
+            titre.setAlignmentX(Component.LEFT_ALIGNMENT);
+            top.add(titre);
+            top.add(Box.createVerticalStrut(Styles.PADDING_SM));
+            JLabel sub = Styles.mutedLabel("Vue d\u2019ensemble du catalogue et de l\u2019activit\u00e9.");
+            sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+            top.add(sub);
+            adminStatsCard.add(top, BorderLayout.NORTH);
+
+            // Grille de tuiles
+            JPanel grid = new JPanel(new GridLayout(0, 3, Styles.PADDING_LG, Styles.PADDING_LG));
             grid.setBackground(Styles.BG_MAIN);
-            grid.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
+            grid.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2));
 
             Object[][] stats = {
-                    {"\uD83C\uDFB5 Morceaux",   nbM},
-                    {"\uD83D\uDCBF Albums",      nbA},
-                    {"\uD83C\uDFA4 Artistes",    nbAr},
-                    {"\uD83C\uDFB8 Groupes",     nbG},
-                    {"\uD83D\uDC64 Utilisateurs",nbU},
-                    {"\u25B6 \u00c9coutes",      nbE},
+                    {"\uD83C\uDFB5 Morceaux",    nbM,  Styles.TEAL},
+                    {"\uD83D\uDCBF Albums",       nbA,  new Color(99, 102, 241)},
+                    {"\uD83C\uDFA4 Artistes",     nbAr, new Color(16, 185, 129)},
+                    {"\uD83C\uDFB8 Groupes",      nbG,  new Color(245, 158, 11)},
+                    {"\uD83D\uDC64 Utilisateurs", nbU,  new Color(59, 130, 246)},
+                    {"\u25B6 \u00c9coutes totales",nbE, new Color(239, 68, 68)},
             };
             for (Object[] s : stats) {
                 JPanel tile = Styles.cardPanel();
                 tile.setLayout(new BoxLayout(tile, BoxLayout.Y_AXIS));
+                tile.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Styles.BORDER, 1, true),
+                        BorderFactory.createEmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG, Styles.PADDING_MD, Styles.PADDING_LG)
+                ));
+
                 JLabel val = new JLabel("" + s[1]);
-                val.setFont(Styles.FONT_TITLE.deriveFont(32f));
-                val.setForeground(Styles.TEAL);
+                val.setFont(Styles.FONT_TITLE.deriveFont(Font.BOLD, 40f));
+                val.setForeground((Color) s[2]);
+                val.setAlignmentX(Component.LEFT_ALIGNMENT);
+
                 JLabel lbl = Styles.mutedLabel(s[0].toString());
+                lbl.setFont(Styles.FONT_BODY_BOLD);
+                lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+
                 tile.add(val);
+                tile.add(Box.createVerticalStrut(4));
                 tile.add(lbl);
                 grid.add(tile);
             }
 
-            card.add(grid, BorderLayout.CENTER);
-            card.revalidate();
-            card.repaint();
+            adminStatsCard.add(grid, BorderLayout.CENTER);
+            adminStatsCard.revalidate();
+            adminStatsCard.repaint();
         });
     }
 
@@ -1915,15 +2019,28 @@ public final class VueGraphique extends VueConsole {
                 SwingUtilities.invokeAndWait(() -> showCard("catalogue"));
             }
         } catch (Exception ignored) {}
+
+        // Si un filtre a été intercepté pendant naviguer(), on le consomme directement
+        Integer enAttente = catalogueFiltreEnAttente;
+        if (enAttente != null) {
+            catalogueFiltreEnAttente = null;
+            catalogueIntQueue.clear(); // vider les éventuels doublons
+            if (enAttente == 100) {
+                SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
+                return 1;
+            }
+            return enAttente;
+        }
+
+        // Vider les valeurs parasites restantes dans la queue avant d'attendre
+        catalogueIntQueue.clear();
+
         try {
             while (true) {
                 int v = catalogueIntQueue.take();
                 if (v == 100) {
-                    // "Tout" : vider le champ de recherche et lancer une recherche globale vide
-                    SwingUtilities.invokeLater(() -> {
-                        if (catalogueSearchField != null) catalogueSearchField.setText("");
-                    });
-                    return 1; // case 1 = recherche avec demanderRecherche() = ""
+                    SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
+                    return 1;
                 }
                 return v;
             }
@@ -1947,15 +2064,17 @@ public final class VueGraphique extends VueConsole {
         try {
             while (true) {
                 int v = catalogueIntQueue.take();
-                if (v >= 1000000) {
-                    // Encodage : type*1000000 + id
-                    dernierTypeNav = v / 1000000;
-                    dernierIdNav   = v % 1000000;
+                if (v >= 1_000_000) {
+                    // Encodage : type*1000000 + id → clic "Détails"
+                    dernierTypeNav = v / 1_000_000;
+                    dernierIdNav   = v % 1_000_000;
                     return dernierTypeNav;
                 }
-                // Valeur filtre (2-7) ou retour (7) : on la remet dans la queue
-                // pour que afficherMenuCatalogue() la consomme après retour de naviguer()
-                catalogueIntQueue.put(v);
+                // Valeur filtre (1-7) ou "Tout" (100) : l'utilisateur a cliqué
+                // un bouton de filtre pendant la navigation → mémoriser et sortir
+                // proprement sans remettre dans la queue (évite la boucle infinie)
+                catalogueFiltreEnAttente = v;
+                catalogueIntQueue.clear(); // vider les doublons éventuels
                 return 5; // retour = sortir de naviguer()
             }
         } catch (InterruptedException e) { return 5; }
@@ -2352,6 +2471,8 @@ public final class VueGraphique extends VueConsole {
 
     @Override public void notifierSessionAdmin(String nom) {
         setSessionState(SessionState.ADMIN, nom);
+        // Afficher la page de gestion catalogue par défaut à la connexion
+        runOnEdt(() -> showCard("gestionCatalogue"));
     }
     @Override public void notifierSessionClient(String nom) {
         setSessionState(SessionState.CLIENT, nom);

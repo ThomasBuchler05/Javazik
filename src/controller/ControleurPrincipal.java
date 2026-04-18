@@ -128,6 +128,7 @@ public class ControleurPrincipal {
                 case 11: adminGererComptes(); break;
                 case 12: adminStatistiques(); break;
                 case 13: vue.afficherRetourMenuPrincipal(); break;
+                case 14: menuCatalogue(); break;
                 default: vue.afficherChoixInvalide();
             }
         } while (choix != 13);
