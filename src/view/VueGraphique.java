@@ -217,10 +217,36 @@ public final class VueGraphique extends VueConsole {
     private JPanel buildLogoHeader() {
         JPanel p = transparentPanel();
         p.setLayout(new FlowLayout(FlowLayout.LEFT, Styles.PADDING_LG, 0));
+
+        // Logo avec point "live" animé
+        JPanel logoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        logoRow.setOpaque(false);
+
         JLabel logo = new JLabel("JAVAZIK  \u266A");
         logo.setFont(Styles.FONT_LOGO);
         logo.setForeground(Styles.TEXT_ON_TEAL);
-        p.add(logo);
+
+        // Indicateur "live" (petit cercle qui pulse entre deux alphas)
+        JLabel liveDot = new JLabel("\u25CF") {
+            private boolean bright = true;
+            {
+                javax.swing.Timer t = new javax.swing.Timer(800, e -> {
+                    bright = !bright;
+                    setForeground(bright
+                            ? new Color(255, 255, 255, 220)
+                            : new Color(255, 255, 255, 80));
+                    repaint();
+                });
+                t.start();
+            }
+        };
+        liveDot.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+        liveDot.setForeground(new Color(255, 255, 255, 220));
+
+        logoRow.add(logo);
+        logoRow.add(liveDot);
+        p.add(logoRow);
+
         p.setAlignmentX(Component.LEFT_ALIGNMENT);
         p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         return p;
@@ -452,8 +478,16 @@ public final class VueGraphique extends VueConsole {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(Styles.BG_MAIN);
 
-        // Bannière hero avec dégradé teal simulé
+        // Bannière hero avec dégradé teal simulé et notes animées
         JPanel hero = new JPanel() {
+            private float noteOffset = 0f;
+            {
+                javax.swing.Timer anim = new javax.swing.Timer(60, e -> {
+                    noteOffset = (noteOffset + 0.6f) % 40f;
+                    repaint();
+                });
+                anim.start();
+            }
             @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
                 Graphics2D g2 = (Graphics2D) g.create();
@@ -461,12 +495,16 @@ public final class VueGraphique extends VueConsole {
                 GradientPaint gp = new GradientPaint(0, 0, Styles.TEAL, getWidth(), getHeight(), Styles.TEAL_DARK);
                 g2.setPaint(gp);
                 g2.fillRect(0, 0, getWidth(), getHeight());
-                // Note musicales déco semi-transparentes
+                // Notes musicales semi-transparentes flottantes
                 g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 80));
-                g2.setColor(new Color(255, 255, 255, 25));
-                g2.drawString("\u266B", getWidth() - 160, 100);
-                g2.drawString("\u266A", getWidth() - 280, 60);
-                g2.drawString("\u2669", getWidth() - 60, 140);
+                g2.setColor(new Color(255, 255, 255, 22));
+                g2.drawString("\u266B", getWidth() - 160, (int)(95 + noteOffset));
+                g2.drawString("\u266A", getWidth() - 290, (int)(55 + noteOffset * 0.7f));
+                g2.drawString("\u2669", getWidth() - 55,  (int)(135 + noteOffset * 1.3f));
+                g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 44));
+                g2.setColor(new Color(255, 255, 255, 12));
+                g2.drawString("\u266C", getWidth() - 380, (int)(65 + noteOffset * 0.5f));
+                g2.drawString("\u266B", 50, (int)(155 + noteOffset * 0.9f));
                 g2.dispose();
             }
         };
@@ -931,8 +969,8 @@ public final class VueGraphique extends VueConsole {
             fb.setFont(Styles.FONT_SMALL);
             fb.setFocusPainted(false);
             fb.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            fb.setBackground(Styles.BG_MAIN);
-            fb.setForeground(Styles.TEAL);
+            fb.setBackground(fi == 0 ? Styles.TEAL : Styles.BG_MAIN);
+            fb.setForeground(fi == 0 ? Styles.TEXT_ON_TEAL : Styles.TEAL);
             fb.setOpaque(true);
             fb.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(Styles.TEAL, 1, true),
@@ -950,6 +988,7 @@ public final class VueGraphique extends VueConsole {
                 }
             });
             fb.addActionListener(e -> {
+                // Mise à jour immédiate du style du bouton actif (sans attendre le contrôleur)
                 for (int j = 0; j < filtreButtons.size(); j++) {
                     JButton btn = filtreButtons.get(j);
                     if (j == fi) {
@@ -960,6 +999,8 @@ public final class VueGraphique extends VueConsole {
                         btn.setForeground(Styles.TEAL);
                     }
                 }
+                // Vider les clics précédents non consommés pour éviter les doublons
+                catalogueIntQueue.clear();
                 try { catalogueIntQueue.put(filtreId); } catch (InterruptedException ignored) {}
             });
             filtreButtons.add(fb);
@@ -967,7 +1008,12 @@ public final class VueGraphique extends VueConsole {
         }
         topBar.add(filterBar);
 
-        card.add(topBar, BorderLayout.NORTH);
+        // Wrapper avec notes flottantes a droite
+        JPanel topBarWrapper1 = new JPanel(new BorderLayout());
+        topBarWrapper1.setBackground(Styles.BG_MAIN);
+        topBarWrapper1.add(topBar, BorderLayout.CENTER);
+        topBarWrapper1.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapper1, BorderLayout.NORTH);
 
         // ---- Zone de contenu scrollable ----
         catalogueContentArea = new JPanel();
@@ -1013,6 +1059,8 @@ public final class VueGraphique extends VueConsole {
      * Construit un panneau liste générique.
      * typeCode : 1=morceau, 2=album, 3=artiste, 4=groupe
      * Les boutons Détails poussent typeCode*1_000_000 + id dans catalogueIntQueue.
+     * En contexte admin (isAdminCatalogueContext()), les lignes affichent l'ID
+     * et un bouton "Supprimer" direct qui pousse dans suppressionDirecteQueue.
      */
     private <T> JPanel buildListPanel(String sectionTitle, List<T> items,
                                       java.util.function.Function<T, String> toLabel,
@@ -1022,22 +1070,46 @@ public final class VueGraphique extends VueConsole {
         p.setBackground(Styles.BG_MAIN);
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
 
+        boolean adminCtx = isAdminCatalogueContext();
+
         if (!items.isEmpty()) {
             JLabel sec = Styles.subtitleLabel(sectionTitle);
             sec.setAlignmentX(Component.LEFT_ALIGNMENT);
             sec.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, Styles.PADDING_SM, 0));
             p.add(sec);
+
+            // En contexte admin : en-tête avec colonne ID visible
+            if (adminCtx) {
+                JPanel header = new JPanel(new java.awt.GridLayout(1, 3, Styles.PADDING_MD, 0));
+                header.setBackground(Styles.TEAL_SURFACE);
+                header.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
+                header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+                header.setAlignmentX(Component.LEFT_ALIGNMENT);
+                for (String col : new String[]{"ID", "Nom / Titre", "Action rapide"}) {
+                    JLabel h = new JLabel(col);
+                    h.setFont(Styles.FONT_SMALL_BOLD);
+                    h.setForeground(Styles.TEAL_DARK);
+                    header.add(h);
+                }
+                p.add(header);
+            }
         }
 
         for (T item : items) {
-            JPanel row = new JPanel(new BorderLayout());
+            int itemId = toId.apply(item);
+
+            JPanel row;
+            if (adminCtx) {
+                row = new JPanel(new java.awt.GridLayout(1, 3, Styles.PADDING_MD, 0));
+            } else {
+                row = new JPanel(new BorderLayout());
+            }
             row.setBackground(Styles.BG_ALT);
             row.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
                     BorderFactory.createEmptyBorder(10, 14, 10, 14)));
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, adminCtx ? 44 : 52));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
-            // Hover effect
             row.addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mouseEntered(java.awt.event.MouseEvent e) {
                     row.setBackground(Styles.TEAL_SURFACE);
@@ -1049,17 +1121,37 @@ public final class VueGraphique extends VueConsole {
                 }
             });
 
-            JLabel lbl = Styles.bodyLabel(toLabel.apply(item));
-            row.add(lbl, BorderLayout.CENTER);
+            if (adminCtx) {
+                // Colonne ID avec badge teal
+                JLabel lblId = new JLabel("# " + itemId);
+                lblId.setFont(Styles.FONT_SMALL_BOLD);
+                lblId.setForeground(Styles.TEAL);
+                row.add(lblId);
 
-            if (typeCode > 0) {
-                JButton btnDetail = Styles.secondaryButton("D\u00e9tails \u203a");
-                btnDetail.setFont(Styles.FONT_SMALL);
-                int encoded = typeCode * 1_000_000 + toId.apply(item);
-                btnDetail.addActionListener(e -> {
-                    try { catalogueIntQueue.put(encoded); } catch (InterruptedException ignored) {}
+                // Colonne Nom
+                JLabel lbl = Styles.bodyLabel(toLabel.apply(item));
+                row.add(lbl);
+
+                // Colonne Action : bouton Supprimer direct (remplissage automatique de l'ID)
+                JButton btnSupprDirect = Styles.dangerButton("\u2212 Supprimer (ID " + itemId + ")");
+                btnSupprDirect.setFont(Styles.FONT_SMALL);
+                btnSupprDirect.addActionListener(e -> {
+                    try { suppressionDirecteQueue.put(itemId); } catch (InterruptedException ignored) {}
                 });
-                row.add(btnDetail, BorderLayout.EAST);
+                row.add(btnSupprDirect);
+            } else {
+                JLabel lbl = Styles.bodyLabel(toLabel.apply(item));
+                row.add(lbl, BorderLayout.CENTER);
+
+                if (typeCode > 0) {
+                    JButton btnDetail = Styles.secondaryButton("D\u00e9tails \u203a");
+                    btnDetail.setFont(Styles.FONT_SMALL);
+                    int encoded = typeCode * 1_000_000 + itemId;
+                    btnDetail.addActionListener(e -> {
+                        try { catalogueIntQueue.put(encoded); } catch (InterruptedException ignored) {}
+                    });
+                    row.add(btnDetail, BorderLayout.EAST);
+                }
             }
             p.add(row);
         }
@@ -1086,11 +1178,11 @@ public final class VueGraphique extends VueConsole {
         p.setBackground(Styles.BG_MAIN);
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
 
-        // Bouton retour
-        JButton btnBack = Styles.secondaryButton("\u2190 Retour");
+        // Bouton retour avec icône flèche
+        JButton btnBack = Styles.secondaryButton("\u2190 Retour \u00e0 la liste");
         btnBack.setFont(Styles.FONT_SMALL);
         btnBack.setAlignmentX(Component.LEFT_ALIGNMENT);
-        btnBack.setMaximumSize(new Dimension(120, 34));
+        btnBack.setMaximumSize(new Dimension(180, 34));
         btnBack.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(Styles.BORDER, 1, true),
                 BorderFactory.createEmptyBorder(6, 14, 6, 14)));
@@ -1106,28 +1198,36 @@ public final class VueGraphique extends VueConsole {
         t.setBorder(new EmptyBorder(0, 0, Styles.PADDING_MD, 0));
         p.add(t);
 
-        JPanel card = Styles.cardPanel();
+        // Carte avec barre d'accent teal à gauche pour un style plus dynamique
+        JPanel card = Styles.accentCardPanel(Styles.TEAL);
         card.setLayout(new GridBagLayout());
         card.setAlignmentX(Component.LEFT_ALIGNMENT);
-        card.setMaximumSize(new Dimension(600, Integer.MAX_VALUE));
+        card.setMaximumSize(new Dimension(620, Integer.MAX_VALUE));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = new Insets(4, 8, 4, 16);
+        gbc.insets = new Insets(6, 10, 6, 20);
 
         int row = 0;
         for (String[] kv : lignes) {
             gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
-            JLabel key = new JLabel(kv[0] + " :");
-            key.setFont(Styles.FONT_BODY_BOLD);
+            JLabel key = new JLabel(kv[0]);
+            key.setFont(Styles.FONT_SMALL_BOLD);
             key.setForeground(Styles.TEXT_MUTED);
             card.add(key, gbc);
 
             gbc.gridx = 1; gbc.weightx = 1;
-            JLabel val = new JLabel(kv[1]);
-            val.setFont(Styles.FONT_BODY);
-            val.setForeground(Styles.TEXT);
-            card.add(val, gbc);
+            // L'ID est affiché comme un badge coloré
+            JComponent valComp;
+            if (kv[0].equals("ID")) {
+                valComp = Styles.badgeLabel("# " + kv[1]);
+            } else {
+                JLabel val = new JLabel(kv[1]);
+                val.setFont(Styles.FONT_BODY);
+                val.setForeground(Styles.TEXT);
+                valComp = val;
+            }
+            card.add(valComp, gbc);
             row++;
         }
         p.add(card);
@@ -1175,7 +1275,11 @@ public final class VueGraphique extends VueConsole {
         playlistsStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         topBar.add(playlistsStatusLabel);
 
-        card.add(topBar, BorderLayout.NORTH);
+        JPanel topBarWrapper2 = new JPanel(new BorderLayout());
+        topBarWrapper2.setBackground(Styles.BG_MAIN);
+        topBarWrapper2.add(topBar, BorderLayout.CENTER);
+        topBarWrapper2.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapper2, BorderLayout.NORTH);
 
         // ---- Zone scrollable ----
         playlistsContentArea = new JPanel();
@@ -1327,7 +1431,12 @@ public final class VueGraphique extends VueConsole {
         btnSearch.setPreferredSize(new Dimension(130, 40));
         searchBar.add(btnSearch, BorderLayout.EAST);
         topBar.add(searchBar);
-        card.add(topBar, BorderLayout.NORTH);
+
+        JPanel topBarWrapper3 = new JPanel(new BorderLayout());
+        topBarWrapper3.setBackground(Styles.BG_MAIN);
+        topBarWrapper3.add(topBar, BorderLayout.CENTER);
+        topBarWrapper3.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapper3, BorderLayout.NORTH);
 
         // ---- Zone résultats ----
         ecouteContentArea = new JPanel();
@@ -1420,7 +1529,11 @@ public final class VueGraphique extends VueConsole {
         sub.setAlignmentX(Component.LEFT_ALIGNMENT);
         topBar.add(sub);
 
-        card.add(topBar, BorderLayout.NORTH);
+        JPanel topBarWrapper4 = new JPanel(new BorderLayout());
+        topBarWrapper4.setBackground(Styles.BG_MAIN);
+        topBarWrapper4.add(topBar, BorderLayout.CENTER);
+        topBarWrapper4.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapper4, BorderLayout.NORTH);
 
         historiqueContentArea = new JPanel();
         historiqueContentArea.setBackground(Styles.BG_MAIN);
@@ -1448,6 +1561,15 @@ public final class VueGraphique extends VueConsole {
     // LinkedBlockingQueue : le put() depuis l'EDT (sidebar) ne bloque jamais,
     // même si le thread contrôleur n'est pas encore en train de faire un take().
     private final java.util.concurrent.LinkedBlockingQueue<Object> adminQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+
+    /**
+     * Queue dédiée pour la suppression par clic direct sur une ligne de liste.
+     * Quand l'utilisateur clique "Supprimer" sur une ligne de la liste admin,
+     * l'ID est poussé ici. demanderIdSuppression() consomme depuis cette queue
+     * en priorité (si non vide) avant d'ouvrir un dialog.
+     */
+    private final java.util.concurrent.LinkedBlockingQueue<Integer> suppressionDirecteQueue =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
     /**
@@ -1485,7 +1607,7 @@ public final class VueGraphique extends VueConsole {
 
         JLabel sub = Styles.mutedLabel(
                 "Ajoutez ou supprimez des \u00e9l\u00e9ments du catalogue. " +
-                        "Les listes s\u2019affichent ci-dessous pour r\u00e9cup\u00e9rer un ID.");
+                        "Cliquez directement sur \u00ab\u00a0\u2212 Supprimer\u00a0\u00bb dans la liste pour supprimer sans saisir d\u2019ID.");
         sub.setAlignmentX(Component.LEFT_ALIGNMENT);
         top.add(sub);
         top.add(Box.createVerticalStrut(Styles.PADDING_MD));
@@ -1495,8 +1617,9 @@ public final class VueGraphique extends VueConsole {
         adminCatalogueStatus.setFont(Styles.FONT_SMALL_BOLD);
         adminCatalogueStatus.setForeground(Styles.TEXT_MUTED);
         adminCatalogueStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
-        adminCatalogueStatus.setBorder(new EmptyBorder(
-                Styles.PADDING_SM, Styles.PADDING_MD, Styles.PADDING_SM, Styles.PADDING_MD));
+        adminCatalogueStatus.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 4, 0, 0, Styles.TEAL),
+                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD, Styles.PADDING_SM, Styles.PADDING_MD)));
         adminCatalogueStatus.setOpaque(true);
         adminCatalogueStatus.setBackground(Styles.BG_ALT);
         adminCatalogueStatus.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
@@ -1535,7 +1658,12 @@ public final class VueGraphique extends VueConsole {
         }));
 
         top.add(sectionsPanel);
-        card.add(top, BorderLayout.NORTH);
+
+        JPanel topBarWrapperAdm = new JPanel(new BorderLayout());
+        topBarWrapperAdm.setBackground(Styles.BG_MAIN);
+        topBarWrapperAdm.add(top, BorderLayout.CENTER);
+        topBarWrapperAdm.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapperAdm, BorderLayout.NORTH);
 
         // ========== ZONE DE LISTE CONTEXTUELLE (scrollable) ==========
         // C'est dans cette zone que s'affichent les listes de morceaux/albums/...
@@ -1615,7 +1743,12 @@ public final class VueGraphique extends VueConsole {
         adminComptesStatus.setForeground(new Color(22, 163, 74));
         adminComptesStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
         top.add(adminComptesStatus);
-        card.add(top, BorderLayout.NORTH);
+
+        JPanel topBarWrapperCpt = new JPanel(new BorderLayout());
+        topBarWrapperCpt.setBackground(Styles.BG_MAIN);
+        topBarWrapperCpt.add(top, BorderLayout.CENTER);
+        topBarWrapperCpt.add(buildFloatingNotesPanel(), BorderLayout.EAST);
+        card.add(topBarWrapperCpt, BorderLayout.NORTH);
 
         adminComptesContent = new JPanel();
         adminComptesContent.setBackground(Styles.BG_MAIN);
@@ -1660,20 +1793,21 @@ public final class VueGraphique extends VueConsole {
 
     /**
      * Met à jour le bandeau de feedback en haut de la carte admin.
-     * Contrairement à l'ancienne version, cette méthode NE touche PAS à la
-     * zone de liste (adminCatalogueContent) — le message et la liste cohabitent.
+     * La bordure gauche change de couleur : teal=succès, rouge=erreur.
      */
     private void setAdminCatalogueMsg(String msg, boolean success) {
         runOnEdt(() -> {
             if (adminCatalogueStatus == null) return;
             adminCatalogueStatus.setText(msg);
-            if (success) {
-                adminCatalogueStatus.setForeground(new Color(22, 163, 74));
-                adminCatalogueStatus.setBackground(new Color(240, 253, 244));
-            } else {
-                adminCatalogueStatus.setForeground(Styles.DANGER);
-                adminCatalogueStatus.setBackground(new Color(254, 242, 242));
-            }
+            Color accentColor = success ? Styles.SUCCESS : Styles.DANGER;
+            Color bgColor     = success ? Styles.SUCCESS_SURFACE : new Color(254, 242, 242);
+            Color textColor   = success ? Styles.SUCCESS : Styles.DANGER;
+            adminCatalogueStatus.setForeground(textColor);
+            adminCatalogueStatus.setBackground(bgColor);
+            adminCatalogueStatus.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 4, 0, 0, accentColor),
+                    BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD,
+                            Styles.PADDING_SM, Styles.PADDING_MD)));
         });
     }
 
@@ -1765,6 +1899,57 @@ public final class VueGraphique extends VueConsole {
         JPanel p = new JPanel();
         p.setOpaque(false);
         return p;
+    }
+
+    /**
+     * Cree un panneau decoratif avec des notes musicales flottantes animees.
+     * A ajouter en BorderLayout.EAST sur n'importe quelle topBar de page.
+     * Les notes descendent lentement en boucle.
+     */
+    private JPanel buildFloatingNotesPanel() {
+        JPanel notes = new JPanel() {
+            private float offset = 0f;
+            {
+                javax.swing.Timer t = new javax.swing.Timer(60, e -> {
+                    offset = (offset + 0.4f) % getHeight();
+                    repaint();
+                });
+                t.start();
+            }
+            @Override protected void paintComponent(java.awt.Graphics g) {
+                super.paintComponent(g);
+                java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                        java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                int h = getHeight();
+                if (h == 0) { g2.dispose(); return; }
+                // Trois notes en positions decalees qui descendent en boucle
+                String[] noteChars = {"\u266B", "\u266A", "\u2669", "\u266C"};
+                int[] xPos   = {20, 55, 10, 45};
+                int[] yStart = {0, 40, 20, 60};
+                int[] sizes  = {22, 16, 18, 14};
+                int[] alphas = {90, 70, 80, 55};
+                for (int i = 0; i < noteChars.length; i++) {
+                    float yF = (yStart[i] + offset) % h;
+                    g2.setFont(new java.awt.Font(java.awt.Font.SANS_SERIF,
+                            java.awt.Font.PLAIN, sizes[i]));
+                    // Fondu entrant/sortant selon position verticale
+                    float rel = yF / h;
+                    int fadeAlpha = (int)(alphas[i] * Math.sin(Math.PI * rel));
+                    fadeAlpha = Math.max(10, Math.min(alphas[i], fadeAlpha));
+                    g2.setColor(new java.awt.Color(
+                            Styles.TEAL.getRed(),
+                            Styles.TEAL.getGreen(),
+                            Styles.TEAL.getBlue(),
+                            fadeAlpha));
+                    g2.drawString(noteChars[i], xPos[i], (int)yF);
+                }
+                g2.dispose();
+            }
+        };
+        notes.setOpaque(false);
+        notes.setPreferredSize(new java.awt.Dimension(80, 0));
+        return notes;
     }
 
     /**
@@ -2218,7 +2403,37 @@ public final class VueGraphique extends VueConsole {
     @Override public int    demanderIdArtisteAssociation(){ return parseIntPromptCancellable("Associer artiste \u2192 groupe (2/2)", "ID de l'artiste :"); }
     @Override public void   afficherMembreAjouteDansGroupe(String na, String ng){ setAdminCatalogueMsg("\u00ab " + na + " \u00bb ajout\u00e9 dans \u00ab " + ng + " \u00bb \u2714", true); }
 
-    @Override public int    demanderIdSuppression() { return parseIntPromptCancellable("Suppression", "ID de l'\u00e9l\u00e9ment \u00e0 supprimer :"); }
+    @Override public int    demanderIdSuppression() {
+        // Bloque jusqu'au clic sur un bouton "Supprimer" dans la liste.
+        // Affiche un hint orange dans le bandeau pour guider l'utilisateur.
+        try {
+            runOnEdt(() -> {
+                if (adminCatalogueStatus != null) {
+                    adminCatalogueStatus.setText(
+                            "\u2193  Cliquez sur \u00ab\u00a0\u2212 Supprimer\u00a0\u00bb dans la liste ci-dessous");
+                    adminCatalogueStatus.setForeground(new Color(217, 119, 6));
+                    adminCatalogueStatus.setBackground(new Color(255, 251, 235));
+                    adminCatalogueStatus.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 4, 0, 0, new Color(217, 119, 6)),
+                            BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD,
+                                    Styles.PADDING_SM, Styles.PADDING_MD)));
+                }
+            });
+            while (true) {
+                Integer direct = suppressionDirecteQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (direct != null) {
+                    suppressionDirecteQueue.clear();
+                    return direct;
+                }
+                // Si navigation sortante (clic sidebar) → annuler
+                Object ao = adminQueue.peek();
+                if (ao != null) { return CANCEL_INT; }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return CANCEL_INT;
+        }
+    }
     @Override public void   afficherElementSupprime(String type)          { setAdminCatalogueMsg(type + " supprim\u00e9(e) avec succ\u00e8s \u2714", true); }
     @Override public void   afficherElementNonTrouve(String type, int id) { setAdminCatalogueMsg(type + " introuvable (ID : " + id + ")", false); }
 
@@ -2417,9 +2632,10 @@ public final class VueGraphique extends VueConsole {
 
         // 4. Boucle d'attente normale : on attend un clic filtre, un clic détail,
         //    ou un signal de sortie (navigation sidebar).
+        //    Timeout réduit à 20ms pour une réactivité maximale.
         try {
             while (true) {
-                Integer v = catalogueIntQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                Integer v = catalogueIntQueue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 if (v != null) {
                     if (v == 7) { return 7; }
@@ -2465,8 +2681,8 @@ public final class VueGraphique extends VueConsole {
     @Override public int afficherMenuNavigation() {
         try {
             while (true) {
-                // Poll avec timeout court pour ne pas bloquer à jamais
-                Integer v = catalogueIntQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                // Poll avec timeout réduit à 20ms pour une réactivité maximale
+                Integer v = catalogueIntQueue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 if (v != null) {
                     if (v >= 1_000_000) {
@@ -2566,20 +2782,19 @@ public final class VueGraphique extends VueConsole {
         JPanel panel = buildListPanel("Morceaux (" + l.size() + ")", l,
                 m -> m.getTitre() + " \u2014 " + m.getNomInterprete() + " (" + m.getDureeFormatee() + ")",
                 Morceau::getId, 1);
-        runOnEdt(() -> {
-            if (isAdminCatalogueContext()) {
-                setAdminCatalogueListe(panel);
-            } else {
-                setCatalogueContent(panel);
-            }
-        });
+        // En contexte admin on attend le rendu AVANT que le contrôleur appelle
+        // demanderIdSuppression() — sinon les boutons cliquables n'existent pas encore.
+        if (isAdminCatalogueContext()) {
+            suppressionDirecteQueue.clear(); // vider les anciens clics résiduels
+            runOnEdtAndWait(() -> setAdminCatalogueListe(panel));
+        } else {
+            runOnEdt(() -> setCatalogueContent(panel));
+        }
     }
 
     /**
      * Version SYNCHRONE de afficherListeMorceaux : n'utilise PAS runOnEdt.
      * À appeler UNIQUEMENT depuis un Runnable déjà exécuté sur l'EDT.
-     * Utilisée par afficherMenuCatalogue() pour éviter le double invokeLater
-     * imbriqué qui causait des races au retour sur le catalogue.
      */
     private void afficherListeMorceauxDirect(List<Morceau> l) {
         setCatalogueContent(buildListPanel("Morceaux (" + l.size() + ")", l,
@@ -2591,37 +2806,34 @@ public final class VueGraphique extends VueConsole {
         JPanel panel = buildListPanel("Albums (" + l.size() + ")", l,
                 a -> a.getTitre() + " \u2014 " + a.getNomInterprete() + " (" + a.getAnnee() + ")",
                 Album::getId, 2);
-        runOnEdt(() -> {
-            if (isAdminCatalogueContext()) {
-                setAdminCatalogueListe(panel);
-            } else {
-                setCatalogueContent(panel);
-            }
-        });
+        if (isAdminCatalogueContext()) {
+            suppressionDirecteQueue.clear();
+            runOnEdtAndWait(() -> setAdminCatalogueListe(panel));
+        } else {
+            runOnEdt(() -> setCatalogueContent(panel));
+        }
     }
 
     @Override public void afficherListeArtistes(List<Artiste> l) {
         JPanel panel = buildListPanel("Artistes (" + l.size() + ")", l,
                 a -> a.getNomComplet() + "  \u2022  " + a.getNationalite(), Artiste::getId, 3);
-        runOnEdt(() -> {
-            if (isAdminCatalogueContext()) {
-                setAdminCatalogueListe(panel);
-            } else {
-                setCatalogueContent(panel);
-            }
-        });
+        if (isAdminCatalogueContext()) {
+            suppressionDirecteQueue.clear();
+            runOnEdtAndWait(() -> setAdminCatalogueListe(panel));
+        } else {
+            runOnEdt(() -> setCatalogueContent(panel));
+        }
     }
 
     @Override public void afficherListeGroupes(List<Groupe> l) {
         JPanel panel = buildListPanel("Groupes (" + l.size() + ")", l,
                 g -> g.getNom() + "  \u2022  " + g.getNationalite(), Groupe::getId, 4);
-        runOnEdt(() -> {
-            if (isAdminCatalogueContext()) {
-                setAdminCatalogueListe(panel);
-            } else {
-                setCatalogueContent(panel);
-            }
-        });
+        if (isAdminCatalogueContext()) {
+            suppressionDirecteQueue.clear();
+            runOnEdtAndWait(() -> setAdminCatalogueListe(panel));
+        } else {
+            runOnEdt(() -> setCatalogueContent(panel));
+        }
     }
 
     @Override public void afficherDetailsMorceau(Morceau m) {

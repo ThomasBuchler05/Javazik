@@ -41,6 +41,14 @@ public final class Styles {
     public static final Color DANGER         = new Color(220, 38, 38);
     public static final Color DANGER_DARK    = new Color(185, 28, 28);
 
+    /** Vert succès. */
+    public static final Color SUCCESS        = new Color(22, 163, 74);
+    public static final Color SUCCESS_SURFACE = new Color(240, 253, 244);
+
+    /** Orange avertissement. */
+    public static final Color WARNING        = new Color(217, 119, 6);
+    public static final Color WARNING_SURFACE = new Color(255, 251, 235);
+
     // ==================== POLICES ====================
 
     private static final String FAMILY = chooseFontFamily();
@@ -208,6 +216,39 @@ public final class Styles {
     /** Séparateur horizontal fin pour la sidebar. */
     public static Border sidebarSeparator() {
         return BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(255, 255, 255, 60));
+    }
+
+    /**
+     * Badge ID : fond teal très clair, texte teal, coins arrondis simulés.
+     * Utilisé pour afficher les IDs dans les listes admin.
+     */
+    public static JLabel badgeLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(FONT_SMALL_BOLD);
+        l.setForeground(TEAL);
+        l.setBackground(TEAL_SURFACE);
+        l.setOpaque(true);
+        l.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(180, 225, 225), 1, true),
+                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
+        return l;
+    }
+
+    /**
+     * Panneau "carte" avec bordure gauche colorée (accent bar).
+     * Donne un aspect plus dynamique aux sections.
+     */
+    public static JPanel accentCardPanel(Color accentColor) {
+        JPanel p = new JPanel();
+        p.setBackground(BG_ALT);
+        p.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 4, 0, 0, accentColor),
+                BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(new Color(214, 219, 227), 1, false),
+                        BorderFactory.createEmptyBorder(PADDING_MD, PADDING_MD, PADDING_MD, PADDING_MD)
+                )
+        ));
+        return p;
     }
 
     private Styles() { /* utility class */ }
