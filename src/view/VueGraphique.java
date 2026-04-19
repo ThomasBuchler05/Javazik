@@ -32,6 +32,9 @@ public final class VueGraphique extends VueConsole {
 
     // ==================== ÉTATS DE SESSION ====================
 
+    /**
+     * États de session possibles, déterminant le contenu contextuel de la sidebar.
+     */
     public enum SessionState { DECONNECTE, VISITEUR, CLIENT, ADMIN }
 
     private SessionState sessionState = SessionState.DECONNECTE;
@@ -60,6 +63,10 @@ public final class VueGraphique extends VueConsole {
 
     // ==================== CONSTRUCTEUR ====================
 
+    /**
+     * Construit la vue graphique et initialise tous les composants Swing sur l'EDT.
+     * Bloque jusqu'à ce que la fenêtre soit prête.
+     */
     public VueGraphique() {
         // Construction sur l'EDT pour éviter tout problème de thread-safety Swing
         try {
@@ -443,6 +450,10 @@ public final class VueGraphique extends VueConsole {
     }
 
     /** Affiche la carte demandée (navigation pure, sans effet contrôleur). */
+    /**
+     * Affiche la carte (écran) identifiée par {@code name} dans le CardLayout.
+     * @param name identifiant de la carte (ex. "catalogue", "playlists")
+     */
     public void showCard(String name) {
         cardCourante = name;
         contentLayout.show(contentPanel, name);
@@ -454,6 +465,11 @@ public final class VueGraphique extends VueConsole {
     /**
      * Changement d'état de session + reconstruction sidebar.
      * Thread-safe : s'exécute sur l'EDT même si appelée d'ailleurs.
+     */
+    /**
+     * Met à jour l'état de session et reconstruit la sidebar en conséquence.
+     * @param newState le nouvel état (DECONNECTE, VISITEUR, CLIENT, ADMIN)
+     * @param utilisateur nom de l'utilisateur connecté, ou {@code null} si aucun
      */
     public void setSessionState(SessionState newState, String utilisateur) {
         Runnable rebuild = () -> {
@@ -3313,6 +3329,10 @@ public final class VueGraphique extends VueConsole {
      * ou saisit une valeur non numérique. Le contrôleur doit tester cette valeur
      * et interrompre le workflow en cours si elle est rencontrée.
      */
+    /**
+     * Valeur sentinelle retournée par les saisies entières en mode graphique
+     * pour signaler une annulation (ex. fermeture de dialogue).
+     */
     public static final int CANCEL_INT = Integer.MIN_VALUE;
 
     /**
@@ -3901,7 +3921,7 @@ public final class VueGraphique extends VueConsole {
                     lblMoyenne.setFont(Styles.FONT_SMALL_BOLD);
                     lblMoyenne.setForeground(moyenne >= 4 ? new Color(22, 163, 74)
                             : moyenne >= 3 ? new Color(202, 138, 4)
-                              : new Color(220, 38, 38));
+                            : new Color(220, 38, 38));
                     noteCell.add(lblMoyenne);
 
                     JLabel lblVotes = Styles.bodyLabel(nbVotes + " vote" + (nbVotes > 1 ? "s" : ""));
@@ -4806,6 +4826,12 @@ public final class VueGraphique extends VueConsole {
     }
 
     /** Variante avec ID pour que la vue puisse recharger l'historique autonomement. */
+    /**
+     * Notifie la vue graphique d'une session client ouverte en transmettant
+     * également l'ID de l'utilisateur (nécessaire pour les playlists et l'historique).
+     * @param nom nom du client connecté
+     * @param id  identifiant du client
+     */
     public void notifierSessionClientAvecId(String nom, int id) {
         this.utilisateurId = id;
         setSessionState(SessionState.CLIENT, nom);

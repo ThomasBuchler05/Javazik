@@ -1,6 +1,26 @@
 import controller.ControleurPrincipal;
 
+/**
+ * Point d'entrée de l'application JavaZik.
+ *
+ * <p>Présente une boîte de dialogue de démarrage permettant à l'utilisateur
+ * de choisir entre l'interface graphique Swing et l'interface console.
+ * Selon le choix, un {@link ControleurPrincipal} est instancié dans le mode
+ * approprié, puis lancé.</p>
+ *
+ * <ul>
+ *   <li>Interface graphique : construction sur l'EDT, logique métier sur un
+ *       thread séparé pour ne pas bloquer l'interface.</li>
+ *   <li>Interface console : exécution directe sur le thread principal.</li>
+ * </ul>
+ */
 public class Main {
+
+    /**
+     * Méthode principale de l'application.
+     *
+     * @param args arguments de la ligne de commande (non utilisés)
+     */
     public static void main(String[] args) {
         String[] options = {"Interface graphique (Swing)", "Interface console"};
         int choix = javax.swing.JOptionPane.showOptionDialog(

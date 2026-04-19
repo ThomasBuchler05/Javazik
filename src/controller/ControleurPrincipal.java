@@ -8,14 +8,27 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Contrôleur principal de l'application Javazik.
- * Fait le lien entre le modèle et la vue.
+ * Contrôleur principal de l'application JavaZik.
+ *
+ * <p>Implémente le patron MVC : fait le lien entre le modèle (catalogue,
+ * utilisateurs, playlists, historique) et la vue (console ou graphique Swing).
+ * Toute la logique de navigation, d'authentification et des opérations CRUD
+ * admin est centralisée ici.</p>
+ *
+ * <p>Ce contrôleur est agnostique vis-à-vis de la vue : il ne manipule que
+ * {@link VueConsole}, {@link VueGraphique} en étant un sous-type transparent.</p>
  */
 public class ControleurPrincipal {
 
     private VueConsole vue;
     private Utilisateur utilisateur;
 
+    /**
+     * Crée le contrôleur et instancie la vue appropriée.
+     *
+     * @param graphique {@code true} pour démarrer en mode interface graphique Swing,
+     *                  {@code false} pour le mode console
+     */
     public ControleurPrincipal(boolean graphique) {
         if (graphique) {
             this.vue = new VueGraphique();
@@ -25,6 +38,12 @@ public class ControleurPrincipal {
         this.utilisateur = new Client();
     }
 
+    /**
+     * Lance la boucle principale de l'application.
+     *
+     * <p>Affiche le message de bienvenue puis entre dans la boucle du menu
+     * principal jusqu'à ce que l'utilisateur choisisse de quitter.</p>
+     */
     public void lancer() {
         vue.afficherBienvenue();
         boolean quitter = false;
@@ -44,6 +63,13 @@ public class ControleurPrincipal {
 
     // ==================== CONNEXION ADMIN ====================
 
+    /**
+     * Gère le flux de connexion administrateur.
+     *
+     * <p>Demande l'adresse mail en boucle jusqu'à en trouver une valide,
+     * puis vérifie le mot de passe (3 tentatives maximum).
+     * En cas de succès, ouvre le menu administrateur.</p>
+     */
     private void connexionAdmin() {
         vue.afficherConnexionAdmin();
         String resultat;
@@ -74,6 +100,13 @@ public class ControleurPrincipal {
 
     // ==================== CONNEXION CLIENT ====================
 
+    /**
+     * Gère le flux de connexion client (abonné).
+     *
+     * <p>Demande l'adresse mail en boucle jusqu'à en trouver une valide,
+     * puis vérifie le mot de passe (3 tentatives maximum).
+     * En cas de succès, notifie la vue de la session et ouvre le menu client.</p>
+     */
     private void connexionClient() {
         vue.afficherConnexionClient();
         String resultat;
@@ -110,6 +143,12 @@ public class ControleurPrincipal {
 
     // ==================== INSCRIPTION ====================
 
+    /**
+     * Gère le flux d'inscription d'un nouveau compte client.
+     *
+     * <p>Collecte nom, prénom, email et mot de passe, puis délègue
+     * la création du compte au modèle {@link Utilisateur}.</p>
+     */
     private void inscription() {
         String nom = vue.demanderNom();
         String prenom = vue.demanderPrenom();
@@ -121,6 +160,13 @@ public class ControleurPrincipal {
 
     // ==================== MENU ADMIN ====================
 
+    /**
+     * Boucle du menu administrateur.
+     *
+     * <p>Dispatche les actions CRUD sur les morceaux, albums, artistes,
+     * groupes et comptes abonnés, ainsi que la consultation des statistiques.
+     * La boucle se termine quand l'utilisateur choisit "Retour" (option 13).</p>
+     */
     private void menuAdmin() {
         int choix;
         do {
@@ -147,17 +193,34 @@ public class ControleurPrincipal {
 
     // ==================== HELPERS ANNULATION ====================
 
-    /** Teste si une saisie entière admin signale une annulation/entrée invalide. */
+    /**
+     * Indique si une saisie entière correspond à un signal d'annulation
+     * (valeur spéciale {@link VueGraphique#CANCEL_INT} en mode graphique).
+     *
+     * @param value la valeur entière lue depuis la vue
+     * @return {@code true} si la saisie doit être interprétée comme une annulation
+     */
     private boolean isCancelled(int value) {
         return value == VueGraphique.CANCEL_INT;
     }
 
-    /** Teste si une saisie texte admin signale une annulation ou un champ vide. */
+    /**
+     * Indique si une saisie texte correspond à une annulation ou à un champ vide.
+     *
+     * @param value la chaîne lue depuis la vue, potentiellement {@code null}
+     * @return {@code true} si la saisie est {@code null} ou vide après trim
+     */
     private boolean isCancelled(String value) {
         return value == null || value.trim().isEmpty();
     }
 
-    /** Affiche un message d'annulation standard et retourne true (pour early-return). */
+    /**
+     * Affiche un message d'annulation standard et retourne {@code true}.
+     * Permet un early-return lisible dans les méthodes admin :
+     * {@code if (isCancelled(val)) return annuler();}.
+     *
+     * @return toujours {@code true}
+     */
     private boolean annuler() {
         vue.afficherMessage("Action annulee.");
         return true;
@@ -165,6 +228,12 @@ public class ControleurPrincipal {
 
     // ==================== ADMIN : AJOUT / SUPPRESSION ====================
 
+    /**
+     * Flux d'ajout d'un morceau au catalogue.
+     * Affiche les artistes et groupes existants, puis collecte les informations
+     * nécessaires (titre, durée, genre, année, interprète). Annule si l'une
+     * des saisies est invalide ou vide.
+     */
     private void adminAjouterMorceau() {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
@@ -191,6 +260,10 @@ public class ControleurPrincipal {
         vue.afficherMorceauAjoute(m.getId());
     }
 
+    /**
+     * Flux de suppression d'un morceau du catalogue.
+     * Affiche la liste des morceaux puis demande l'ID à supprimer.
+     */
     private void adminSupprimerMorceau() {
         vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
         int id = vue.demanderIdSuppression();
@@ -205,6 +278,10 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Flux d'ajout d'un album au catalogue.
+     * Collecte le titre, l'année et l'interprète (artiste ou groupe).
+     */
     private void adminAjouterAlbum() {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
@@ -225,6 +302,9 @@ public class ControleurPrincipal {
         vue.afficherAlbumAjoute(a.getId());
     }
 
+    /**
+     * Flux de suppression d'un album du catalogue.
+     */
     private void adminSupprimerAlbum() {
         vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
         int id = vue.demanderIdSuppression();
@@ -238,6 +318,10 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Flux d'ajout d'un artiste au catalogue.
+     * Collecte nom, prénom et nationalité.
+     */
     private void adminAjouterArtiste() {
         String nom = vue.demanderNomArtiste();
         if (isCancelled(nom)) { annuler(); return; }
@@ -252,6 +336,9 @@ public class ControleurPrincipal {
         vue.afficherArtisteAjoute(a.getId());
     }
 
+    /**
+     * Flux de suppression d'un artiste du catalogue.
+     */
     private void adminSupprimerArtiste() {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         int id = vue.demanderIdSuppression();
@@ -265,6 +352,10 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Flux d'ajout d'un groupe au catalogue.
+     * Collecte nom, année de création et nationalité.
+     */
     private void adminAjouterGroupe() {
         String nom = vue.demanderNomGroupe();
         if (isCancelled(nom)) { annuler(); return; }
@@ -279,6 +370,9 @@ public class ControleurPrincipal {
         vue.afficherGroupeAjoute(g.getId());
     }
 
+    /**
+     * Flux de suppression d'un groupe du catalogue.
+     */
     private void adminSupprimerGroupe() {
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
         int id = vue.demanderIdSuppression();
@@ -294,6 +388,13 @@ public class ControleurPrincipal {
 
     // ==================== ADMIN : ASSOCIATION MORCEAU <-> ALBUM ====================
 
+    /**
+     * Flux d'association d'un morceau existant à un album existant.
+     *
+     * <p>Affiche les albums disponibles, demande l'ID de l'album cible,
+     * affiche les morceaux disponibles, demande l'ID du morceau et le numéro
+     * de piste, puis effectue l'association via {@link Album#ajouterMorceau}.</p>
+     */
     private void adminAjouterMorceauDansAlbum() {
         List<Album> albums = Catalogue.getTousLesAlbums();
         vue.afficherListeAlbums(albums);
@@ -342,6 +443,13 @@ public class ControleurPrincipal {
 
     // ==================== ADMIN : ASSOCIATION ARTISTE <-> GROUPE ====================
 
+    /**
+     * Flux d'ajout d'un artiste existant comme membre d'un groupe existant.
+     *
+     * <p>Affiche les groupes, demande l'ID du groupe cible, affiche les artistes,
+     * demande l'ID de l'artiste, puis effectue l'association via
+     * {@link Groupe#ajouterMembre}.</p>
+     */
     private void adminAjouterMembreGroupe() {
         List<Groupe> groupes = Catalogue.getTousLesGroupes();
         vue.afficherListeGroupes(groupes);
@@ -378,6 +486,10 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Affiche la liste des abonnés et propose les actions de gestion
+     * (suppression, suspension, réactivation).
+     */
     private void adminGererComptes() {
         List<String[]> abonnes = chargerAbonnes();
         vue.afficherListeAbonnes(abonnes);
@@ -392,6 +504,15 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Charge la liste des abonnés depuis le fichier de persistance.
+     *
+     * <p>Chaque ligne est découpée par {@code ;} et seules les entrées
+     * d'au moins 5 champs sont retournées. Les entrées marquées comme
+     * supprimées (champ 6 = "0") sont ignorées.</p>
+     *
+     * @return la liste des abonnés sous forme de tableaux de chaînes
+     */
     private List<String[]> chargerAbonnes() {
         List<String[]> abonnes = new ArrayList<>();
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
@@ -410,6 +531,16 @@ public class ControleurPrincipal {
         return abonnes;
     }
 
+    /**
+     * Supprime un abonné du fichier de persistance en retirant sa ligne.
+     *
+     * <p>Les entrées déjà marquées supprimées (champ 6 = "0") sont conservées
+     * telles quelles ; seule la ligne correspondant à {@code idAbonne} avec un
+     * statut actif est retirée.</p>
+     *
+     * @param idAbonne l'identifiant de l'abonné à supprimer
+     * @return {@code true} si l'abonné a été trouvé et supprimé, {@code false} sinon
+     */
     private boolean supprimerAbonne(int idAbonne) {
         List<String> lignes = new ArrayList<>();
         boolean trouve = false;
@@ -441,6 +572,12 @@ public class ControleurPrincipal {
         return true;
     }
 
+    /**
+     * Compte le nombre de lignes non vides dans le fichier de persistance,
+     * utilisé comme approximation du nombre total d'utilisateurs inscrits.
+     *
+     * @return le nombre d'utilisateurs, ou 0 si le fichier est absent
+     */
     private int compterUtilisateurs() {
         int count = 0;
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
@@ -454,6 +591,11 @@ public class ControleurPrincipal {
         return count;
     }
 
+    /**
+     * Récupère les statistiques globales du catalogue et les transmet à la vue.
+     * Inclut le nombre de morceaux, albums, artistes, groupes, utilisateurs et
+     * écoutes totales.
+     */
     private void adminStatistiques() {
         vue.afficherStatistiques(
                 Catalogue.getNombreMorceaux(),
@@ -467,6 +609,13 @@ public class ControleurPrincipal {
 
     // ==================== MENU CLIENT ====================
 
+    /**
+     * Boucle du menu client (abonné).
+     *
+     * <p>Propose la consultation du catalogue, la gestion des playlists,
+     * l'écoute illimitée et la consultation de l'historique.
+     * La boucle se termine quand l'utilisateur choisit "Retour" (option 5).</p>
+     */
     private void menuClient() {
         int choix;
         do {
@@ -484,6 +633,12 @@ public class ControleurPrincipal {
 
     // ==================== MENU VISITEUR ====================
 
+    /**
+     * Boucle du menu visiteur (sans compte).
+     *
+     * <p>Propose la consultation du catalogue et l'écoute limitée à 5 morceaux
+     * par session. La boucle se termine quand l'utilisateur choisit "Retour" (option 3).</p>
+     */
     private void menuVisiteur() {
         vue.notifierSessionVisiteur();
         int choix;
@@ -500,6 +655,14 @@ public class ControleurPrincipal {
 
     // ==================== CATALOGUE : NAVIGATION ====================
 
+    /**
+     * Boucle de navigation dans le catalogue musical.
+     *
+     * <p>Permet la recherche globale, la consultation par type d'entité
+     * (morceaux, albums, artistes, groupes) et le filtrage par genre.
+     * Chaque résultat est suivi d'un sous-menu de navigation détaillée
+     * ({@link #naviguer()}).</p>
+     */
     private void menuCatalogue() {
         int choix;
         do {
@@ -544,6 +707,12 @@ public class ControleurPrincipal {
         } while (choix != 7);
     }
 
+    /**
+     * Sous-menu de navigation détaillée après un affichage de résultats.
+     *
+     * <p>Permet de consulter les détails d'un morceau, album, artiste ou groupe
+     * par son identifiant. La boucle se termine quand l'utilisateur choisit "Retour".</p>
+     */
     private void naviguer() {
         boolean continuer = true;
         while (continuer) {
@@ -596,6 +765,13 @@ public class ControleurPrincipal {
 
     // ==================== MENU PLAYLIST ====================
 
+    /**
+     * Boucle de gestion des playlists du client connecté.
+     *
+     * <p>Charge et affiche les playlists existantes au démarrage, puis propose
+     * la création, la consultation, l'ajout/retrait de morceaux, la lecture,
+     * le renommage et la suppression de playlists.</p>
+     */
     private void menuPlaylist() {
         // Charger et afficher les playlists dès l'ouverture de l'écran
         List<Playlist> playlistsInit = Playlist.getPlaylistsClient(utilisateur.getID());
@@ -618,12 +794,18 @@ public class ControleurPrincipal {
         } while (choix != 8);
     }
 
+    /**
+     * Crée une nouvelle playlist pour le client connecté et notifie la vue.
+     */
     private void creerPlaylist() {
         String nom = vue.demanderNomPlaylist();
         Playlist p = Playlist.creer(nom, utilisateur.getID());
         vue.afficherPlaylistCreee(p.getId(), p.getNom());
     }
 
+    /**
+     * Affiche toutes les playlists du client connecté ainsi que leur contenu détaillé.
+     */
     private void voirPlaylists() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -632,6 +814,13 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Ajoute un morceau à une playlist existante du client connecté.
+     *
+     * <p>En mode graphique, si la recherche retourne le jeton {@code "__bypass__"},
+     * l'ID du morceau a déjà été sélectionné par le sélecteur graphique et est
+     * récupéré directement via {@link VueConsole#demanderIdMorceau()}.</p>
+     */
     private void ajouterMorceauPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -663,6 +852,9 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Retire un morceau d'une playlist du client connecté.
+     */
     private void retirerMorceauPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -681,6 +873,9 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Renomme une playlist existante du client connecté.
+     */
     private void renommerPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -698,6 +893,13 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Lance la lecture séquentielle d'une playlist du client connecté.
+     *
+     * <p>Affiche la pochette et simule l'écoute de chaque morceau. L'utilisateur
+     * peut naviguer entre les morceaux (précédent / suivant) ou arrêter la lecture.
+     * Chaque écoute est enregistrée dans l'historique.</p>
+     */
     private void ecouterPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -728,6 +930,9 @@ public class ControleurPrincipal {
         vue.afficherFinPlaylist(cible.getNom());
     }
 
+    /**
+     * Supprime une playlist du client connecté après confirmation de son identifiant.
+     */
     private void supprimerPlaylist() {
         List<Playlist> playlists = Playlist.getPlaylistsClient(utilisateur.getID());
         vue.afficherListePlaylists(playlists);
@@ -744,6 +949,13 @@ public class ControleurPrincipal {
         }
     }
 
+    /**
+     * Recherche une playlist dans une liste par son identifiant.
+     *
+     * @param playlists la liste des playlists dans laquelle chercher
+     * @param id        l'identifiant de la playlist recherchée
+     * @return la playlist correspondante, ou {@code null} si aucune n'est trouvée
+     */
     private Playlist trouverPlaylist(List<Playlist> playlists, int id) {
         for (Playlist p : playlists) {
             if (p.getId() == id) return p;
@@ -753,6 +965,17 @@ public class ControleurPrincipal {
 
     // ==================== ECOUTE ====================
 
+    /**
+     * Boucle d'écoute de morceaux, partagée entre clients et visiteurs.
+     *
+     * <p>Effectue une recherche, affiche les résultats, simule la lecture du
+     * morceau choisi et enregistre l'écoute dans l'historique pour les abonnés.
+     * La boucle s'arrête quand la limite est atteinte ou quand l'utilisateur
+     * choisit de quitter.</p>
+     *
+     * @param maxEcoutes nombre maximum d'écoutes autorisées pour cette session ;
+     *                   {@link Integer#MAX_VALUE} signifie illimité (abonné)
+     */
     private void ecouter(int maxEcoutes) {
         boolean estAbonne = (maxEcoutes == Integer.MAX_VALUE);
         int compteur = 0;
@@ -790,6 +1013,9 @@ public class ControleurPrincipal {
 
     // ==================== HISTORIQUE ====================
 
+    /**
+     * Charge et affiche l'historique d'écoute du client connecté.
+     */
     private void consulterHistorique() {
         List<Historique> historique = Historique.getHistoriqueClient(utilisateur.getID());
         vue.afficherHistorique(historique);
