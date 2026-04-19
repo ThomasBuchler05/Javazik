@@ -46,60 +46,65 @@ public class ControleurPrincipal {
 
     private void connexionAdmin() {
         vue.afficherConnexionAdmin();
-        String mail = vue.demanderMail();
-        String resultat = utilisateur.verifierMailAdmin(mail);
+        String resultat;
+        do {
+            String mail = vue.demanderMail();
+            resultat = utilisateur.verifierMailAdmin(mail);
+            if (resultat.equals("MAIL_NOT_FOUND")) {
+                vue.afficherMailIncorrect();
+            }
+        } while (!resultat.equals("MAIL_FOUND"));
 
-        if (resultat.equals("MAIL_FOUND")) {
-            String mdpSaisi = vue.demanderMdp();
-            int tentatives = 0;
-            while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
-                vue.afficherMdpIncorrect();
-                mdpSaisi = vue.demanderMdp();
-                tentatives++;
-            }
-            if (utilisateur.verifierMdp(mdpSaisi)) {
-                vue.afficherConnexionReussie();
-                vue.notifierSessionAdmin(utilisateur.getNOM());
-                menuAdmin();
-            } else {
-                vue.afficherMessage("Trop de tentatives, retour au menu principal.");
-            }
-        } else if (resultat.equals("NOT_ADMIN")) {
-            vue.afficherPasAdmin();
+        // Mail admin valide : vérifier le mot de passe
+        String mdpSaisi = vue.demanderMdp();
+        int tentatives = 0;
+        while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
+            vue.afficherMdpIncorrect();
+            mdpSaisi = vue.demanderMdp();
+            tentatives++;
+        }
+        if (utilisateur.verifierMdp(mdpSaisi)) {
+            vue.afficherConnexionReussie();
+            vue.notifierSessionAdmin(utilisateur.getNOM());
+            menuAdmin();
         } else {
-            vue.afficherMailIncorrect();
+            vue.afficherMessage("Trop de tentatives, retour au menu principal.");
         }
     }
 
     // ==================== CONNEXION CLIENT ====================
 
     private void connexionClient() {
-        String mail = vue.demanderMail();
-        String resultat = utilisateur.verifierMailClient(mail);
+        vue.afficherConnexionClient();
+        String resultat;
+        // Reboucle tant que le mail est introuvable
+        do {
+            String mail = vue.demanderMail();
+            resultat = utilisateur.verifierMailClient(mail);
+            if (resultat.equals("MAIL_NOT_FOUND")) {
+                vue.afficherMailIncorrect();
+            }
+        } while (!resultat.equals("MAIL_FOUND"));
 
-        if (resultat.equals("MAIL_FOUND")) {
-            String mdpSaisi = vue.demanderMdp();
-            int tentatives = 0;
-            while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
-                vue.afficherMdpIncorrect();
-                mdpSaisi = vue.demanderMdp();
-                tentatives++;
-            }
-            if (utilisateur.verifierMdp(mdpSaisi)) {
-                vue.afficherConnexionReussie();
-                // Notifier avec l'ID pour que la vue puisse recharger l'historique autonomement
-                if (vue instanceof view.VueGraphique) {
-                    ((view.VueGraphique) vue).notifierSessionClientAvecId(
-                            utilisateur.getNOM(), utilisateur.getID());
-                } else {
-                    vue.notifierSessionClient(utilisateur.getNOM());
-                }
-                menuClient();
+        // Mail client valide : vérifier le mot de passe
+        String mdpSaisi = vue.demanderMdp();
+        int tentatives = 0;
+        while (!utilisateur.verifierMdp(mdpSaisi) && tentatives < 3) {
+            vue.afficherMdpIncorrect();
+            mdpSaisi = vue.demanderMdp();
+            tentatives++;
+        }
+        if (utilisateur.verifierMdp(mdpSaisi)) {
+            vue.afficherConnexionReussie();
+            if (vue instanceof view.VueGraphique) {
+                ((view.VueGraphique) vue).notifierSessionClientAvecId(
+                        utilisateur.getNOM(), utilisateur.getID());
             } else {
-                vue.afficherMessage("Trop de tentatives, retour au menu principal.");
+                vue.notifierSessionClient(utilisateur.getNOM());
             }
+            menuClient();
         } else {
-            vue.afficherMailIncorrect();
+            vue.afficherMessage("Trop de tentatives, retour au menu principal.");
         }
     }
 

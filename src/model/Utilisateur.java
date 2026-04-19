@@ -45,7 +45,7 @@ public class Utilisateur {
      * Vérifie la connexion client (choix==2) : cherche le mail dans le fichier
      * Retourne :
      *  - "MAIL_NOT_FOUND" si mail introuvable
-     *  - "MAIL_FOUND" si mail trouvé (le mdp attendu est stocké dans cet objet via setMDP)
+     *  - "MAIL_FOUND" si mail trouvé
      */
     public String verifierMailClient(String mailSaisi) {
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
@@ -53,13 +53,12 @@ public class Utilisateur {
             while ((ligne = br.readLine()) != null) {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
-                // Ligne malformée (moins de 5 champs) : on l'ignore
                 if (parts.length < 5) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
-                String mdp = parts[3];
-                String email = parts[4];
+                String mdp = parts[3].trim();
+                String email = parts[4].trim();
                 if (mailSaisi.equals(email)) {
                     this.ID = Integer.parseInt(id);
                     this.NOM = nom;
@@ -76,11 +75,10 @@ public class Utilisateur {
     }
 
     /**
-     * Vérifie la connexion admin (choix==1) : cherche le mail + vérifie le flag admin (parts[5])
+     * Vérifie la connexion admin (choix==1) : cherche le mail dans le fichier
      * Retourne :
      *  - "MAIL_NOT_FOUND" si mail introuvable
-     *  - "NOT_ADMIN" si mail trouvé mais pas admin
-     *  - "MAIL_FOUND" si mail trouvé et admin (flag == "0")
+     *  - "MAIL_FOUND" si mail trouvé
      */
     public String verifierMailAdmin(String mailSaisi) {
         try (BufferedReader br = new BufferedReader(new FileReader("monfichier.txt"))) {
@@ -88,23 +86,19 @@ public class Utilisateur {
             while ((ligne = br.readLine()) != null) {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
-                // Ligne malformée (moins de 6 champs : pas de flag admin) : on l'ignore
-                if (parts.length < 6) continue;
+                if (parts.length < 5) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
-                String mdp = parts[3];
-                String email = parts[4];
-                String admin = parts[5];
-                if (mailSaisi.equals(email) && admin.equals("0")) {
+                String mdp = parts[3].trim();
+                String email = parts[4].trim();
+                if (mailSaisi.equals(email)) {
                     this.ID = Integer.parseInt(id);
                     this.NOM = nom;
                     this.PRENOM = prenom;
                     this.MDP = mdp;
                     this.EMAIL = email;
                     return "MAIL_FOUND";
-                } else if (mailSaisi.equals(email) && !admin.equals("0")) {
-                    return "NOT_ADMIN";
                 }
             }
         } catch (IOException e) {

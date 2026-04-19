@@ -341,6 +341,10 @@ public class VueConsole {
         System.out.println("\n--- Connexion administrateur ---");
     }
 
+    public void afficherConnexionClient() {
+        System.out.println("\n--- Connexion client ---");
+    }
+
     public String demanderMail() {
         System.out.print("Votre mail : ");
         return clavier.nextLine();
@@ -361,6 +365,10 @@ public class VueConsole {
 
     public void afficherPasAdmin() {
         System.out.println("Ce compte n'est pas administrateur.");
+    }
+
+    public void afficherPasClient() {
+        System.out.println("Ce compte est un compte administrateur. Utilisez la connexion administrateur.");
     }
 
     public void afficherConnexionReussie() {

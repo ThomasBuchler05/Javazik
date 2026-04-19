@@ -640,9 +640,23 @@ public final class VueGraphique extends VueConsole {
     private final JTextField[]     champEmailConnexion = new JTextField[2];
     private final JPasswordField[] champMdpConnexion   = new JPasswordField[2];
     private final JLabel[]         labelErreurConnexion = new JLabel[2];
+    // DocumentListeners actifs pour effacer l'erreur à la frappe — retirés avant ajout
+    private final javax.swing.event.DocumentListener[] errDocListenerEmail = new javax.swing.event.DocumentListener[2];
+    private final javax.swing.event.DocumentListener[] errDocListenerMdp   = new javax.swing.event.DocumentListener[2];
 
     // index 0 = admin, index 1 = client
     private int indexCarteActive = -1;
+
+    /**
+     * Flag d'armement de la saisie de connexion/inscription.
+     * Tant qu'il est à false, submitAction (ActionListener des champs / bouton)
+     * ne pousse RIEN dans saisieCourante. Il est armé uniquement pendant que
+     * le contrôleur attend une valeur via attendreSaisie(), et désarmé dès
+     * qu'une valeur est envoyée. Ceci évite les "submits fantômes" provoqués
+     * par d'anciens ActionEvents, des focus transfers, ou des touches qui
+     * traversent les écrans lors de transitions de cartes.
+     */
+    private volatile boolean saisieArmee = false;
 
     private JPanel buildConnexionCard(String titreStr, String sousTitreStr, String cardKey) {
         int idx = cardKey.equals("connexionAdmin") ? 0 : 1;
@@ -706,13 +720,26 @@ public final class VueGraphique extends VueConsole {
 
         // — Action Entrée / clic —
         Runnable submitAction = () -> {
+            // Garde anti-submit fantôme : si le contrôleur n'a pas armé une attente,
+            // on ignore purement l'événement (peut venir d'un focus transfer, d'un
+            // ActionEvent résiduel, d'une touche Entrée traversant un changement de carte...)
+            if (!saisieArmee) {
+                System.err.println("[SUBMIT IGNORED] saisie non armée");
+                return;
+            }
             // On determine quel champ est actif pour pousser la bonne valeur
             String val;
             if (fieldEmail.isEnabled() && !fieldMdp.isEnabled()) {
                 val = fieldEmail.getText().trim();
-            } else {
+            } else if (fieldMdp.isEnabled()) {
                 val = new String(fieldMdp.getPassword()).trim();
+            } else {
+                // aucun champ enabled : rien à soumettre
+                System.err.println("[SUBMIT IGNORED] aucun champ enabled");
+                return;
             }
+            // Désarmer AVANT le put pour empêcher une double soumission
+            saisieArmee = false;
             lblErreur.setText(" ");
             try { saisieCourante.put(val); } catch (InterruptedException ignored) {}
         };
@@ -775,7 +802,12 @@ public final class VueGraphique extends VueConsole {
         // (demanderNom, demanderPrenom, demanderEmail, demanderMotDePasse).
         // On utilise saisieCourante : chaque appel active un champ et attend.
         Runnable submitInscription = () -> {
+            if (!saisieArmee) {
+                System.err.println("[SUBMIT INSCR IGNORED] saisie non armée");
+                return;
+            }
             String val = determinerValeurInscription();
+            saisieArmee = false;
             inscErreur.setText(" ");
             try { saisieCourante.put(val); } catch (InterruptedException ignored) {}
         };
@@ -845,27 +877,80 @@ public final class VueGraphique extends VueConsole {
     /**
      * Active un champ (focus + enabled), désactive les autres du même formulaire,
      * et nettoie le champ si nécessaire. Doit être appelé sur l'EDT.
+     *
+     * Ordre critique :
+     *   1. retirer l'ancien DocumentListener (s'il y en a un) — sinon le
+     *      setText("") qui suit déclencherait son clearErr() intempestif ;
+     *   2. setEnabled + setText("") sur le champ à armer : aucun listener
+     *      attaché, donc aucun effet de bord ;
+     *   3. ajouter le nouveau DocumentListener APRÈS le setText("") : il ne
+     *      fire que sur la vraie frappe utilisateur ;
+     *   4. requestFocus en invokeLater pour laisser le layout se stabiliser.
      */
     private void activerChampConnexion(int idx, boolean emailActif) {
         JTextField email = champEmailConnexion[idx];
         JPasswordField mdp = champMdpConnexion[idx];
+
         if (emailActif) {
+            // 1. Retirer l'ancien listener avant toute modif du Document
+            if (errDocListenerEmail[idx] != null) {
+                email.getDocument().removeDocumentListener(errDocListenerEmail[idx]);
+                errDocListenerEmail[idx] = null;
+            }
+            // 2. Configurer les champs (aucun listener attaché → setText sans effet de bord)
             email.setEnabled(true);
             email.setText("");
             email.setBackground(Styles.BG_ALT);
             mdp.setEnabled(false);
             mdp.setText("");
             mdp.setBackground(new Color(240, 240, 240));
+            // 3. Installer le nouveau DocumentListener MAINTENANT (pas en invokeLater :
+            //    on est déjà sur l'EDT et le champ est vide et stable)
+            errDocListenerEmail[idx] = new javax.swing.event.DocumentListener() {
+                public void insertUpdate(javax.swing.event.DocumentEvent e)  { clearErr(); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e)  { clearErr(); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+                void clearErr() {
+                    if (labelErreurConnexion[idx] != null)
+                        labelErreurConnexion[idx].setText(" ");
+                    email.getDocument().removeDocumentListener(this);
+                    errDocListenerEmail[idx] = null;
+                }
+            };
+            email.getDocument().addDocumentListener(errDocListenerEmail[idx]);
+            // 4. Focus en invokeLater (l'EDT doit avoir fini de layouter la carte)
             SwingUtilities.invokeLater(email::requestFocusInWindow);
+
         } else {
+            // 1. Retirer l'ancien listener mdp
+            if (errDocListenerMdp[idx] != null) {
+                mdp.getDocument().removeDocumentListener(errDocListenerMdp[idx]);
+                errDocListenerMdp[idx] = null;
+            }
+            // 2. Configurer les champs
             email.setEnabled(false);
             email.setBackground(new Color(240, 240, 240));
+            // NE PAS vider l'email — l'utilisateur vient de le valider
             mdp.setEnabled(true);
             mdp.setText("");
             mdp.setBackground(Styles.BG_ALT);
+            // 3. Installer le nouveau DocumentListener
+            errDocListenerMdp[idx] = new javax.swing.event.DocumentListener() {
+                public void insertUpdate(javax.swing.event.DocumentEvent e)  { clearErr(); }
+                public void removeUpdate(javax.swing.event.DocumentEvent e)  { clearErr(); }
+                public void changedUpdate(javax.swing.event.DocumentEvent e) {}
+                void clearErr() {
+                    if (labelErreurConnexion[idx] != null)
+                        labelErreurConnexion[idx].setText(" ");
+                    mdp.getDocument().removeDocumentListener(this);
+                    errDocListenerMdp[idx] = null;
+                }
+            };
+            mdp.getDocument().addDocumentListener(errDocListenerMdp[idx]);
+            // 4. Focus en invokeLater
             SwingUtilities.invokeLater(mdp::requestFocusInWindow);
         }
-        labelErreurConnexion[idx].setText(" ");
+        // Le label d'erreur reste visible jusqu'à la première frappe
     }
 
     private void activerChampInscription(JComponent actif) {
@@ -882,18 +967,39 @@ public final class VueGraphique extends VueConsole {
     /**
      * Bloque le thread contrôleur jusqu'à ce que saisieCourante contienne une valeur.
      * Affiche d'abord la carte demandée et configure les champs.
+     *
+     * Protocole anti-submit fantôme :
+     *  - purge de toute valeur résiduelle dans la queue (rare mais possible
+     *    avec un offer() passé par submitAction juste avant armement) ;
+     *  - setup EDT SYNCHRONE (invokeAndWait) : installation des champs et
+     *    listeners finie avant l'armement ;
+     *  - armement (saisieArmee = true) APRÈS setupEdt : aucun event antérieur
+     *    ne pourra push une valeur, puisque submitAction l'ignorera ;
+     *  - take() bloquant jusqu'à la vraie soumission utilisateur ;
+     *  - désarmement garanti en finally (le submitAction désarme aussi avant
+     *    put(), mais on re-désarme ici par sécurité en cas d'exception).
      */
     private String attendreSaisie(String cardKey, Runnable setupEdt) {
         try {
+            // 1. Désarmer avant toute chose + purger queue de tout résidu
+            saisieArmee = false;
+            saisieCourante.poll(); // non-bloquant, consomme une éventuelle valeur en attente
+            // 2. Setup EDT synchrone : champs configurés avant qu'on arme
             if (SwingUtilities.isEventDispatchThread()) {
                 setupEdt.run();
             } else {
                 SwingUtilities.invokeAndWait(setupEdt);
             }
+            // 3. Armer : à partir d'ici, la prochaine soumission utilisateur sera acceptée
+            saisieArmee = true;
+            // 4. Bloquer jusqu'à la saisie
             return saisieCourante.take();
         } catch (Exception e) {
             Thread.currentThread().interrupt();
             return "";
+        } finally {
+            // Sécurité : toujours désarmé à la sortie
+            saisieArmee = false;
         }
     }
 
@@ -1023,9 +1129,11 @@ public final class VueGraphique extends VueConsole {
                 Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
         // Wrapper BorderLayout.NORTH pour que BoxLayout calcule la preferredSize correctement
-        JPanel catalogueWrapper = new JPanel(new BorderLayout());
+        ScrollablePanel catalogueWrapper = new ScrollablePanel();
         catalogueWrapper.setBackground(Styles.BG_MAIN);
-        catalogueWrapper.add(catalogueContentArea, BorderLayout.NORTH);
+        catalogueWrapper.setLayout(new BoxLayout(catalogueWrapper, BoxLayout.Y_AXIS));
+        catalogueWrapper.add(catalogueContentArea);
+        catalogueWrapper.add(Box.createVerticalGlue());
 
         JScrollPane scroll = new JScrollPane(catalogueWrapper);
         scroll.setBorder(null);
@@ -1083,7 +1191,8 @@ public final class VueGraphique extends VueConsole {
                 JPanel header = new JPanel(new java.awt.GridLayout(1, 3, Styles.PADDING_MD, 0));
                 header.setBackground(Styles.TEAL_SURFACE);
                 header.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
-                header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+                header.setPreferredSize(new Dimension(0, 30));
+                header.setMinimumSize(new Dimension(0, 30));
                 header.setAlignmentX(Component.LEFT_ALIGNMENT);
                 for (String col : new String[]{"ID", "Nom / Titre", "Action rapide"}) {
                     JLabel h = new JLabel(col);
@@ -1108,7 +1217,8 @@ public final class VueGraphique extends VueConsole {
             row.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
                     BorderFactory.createEmptyBorder(10, 14, 10, 14)));
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, adminCtx ? 44 : 52));
+            row.setPreferredSize(new Dimension(0, adminCtx ? 44 : 52));
+            row.setMinimumSize(new Dimension(0, adminCtx ? 44 : 52));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
             row.addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mouseEntered(java.awt.event.MouseEvent e) {
@@ -1236,154 +1346,404 @@ public final class VueGraphique extends VueConsole {
 
     // ==================== CARTE PLAYLISTS ====================
 
-    private JPanel          playlistsContentArea;
+    private JPanel          playlistsListPanel;   // panneau gauche : liste des playlists
+    private JPanel          playlistsDetailPanel; // panneau droit  : contenu playlist sélectionnée
+    private CardLayout      playlistsDetailLayout;
     private JLabel          playlistsStatusLabel;
+    private JPanel          playlistsFormPanel;   // formulaire inline création/renommage
+    private JTextField      playlistsFormField;   // champ texte du formulaire
+    private JLabel          playlistsFormTitle;   // titre du formulaire ("Nouvelle playlist" / "Renommer")
     private final java.util.concurrent.LinkedBlockingQueue<Object> playlistsQueue =
             new java.util.concurrent.LinkedBlockingQueue<>();
-    // Stocke la liste courante de playlists pour les clics
+    private final java.util.concurrent.SynchronousQueue<String> playlistsNomQueue =
+            new java.util.concurrent.SynchronousQueue<>();
     private List<model.Playlist> playlistsCourantes = new java.util.ArrayList<>();
+    private model.Playlist       playlistSelectionnee = null;
 
     private JPanel buildPlaylistsCard() {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(Styles.BG_MAIN);
 
-        // ---- Barre haute ----
-        JPanel topBar = new JPanel();
-        topBar.setBackground(Styles.BG_MAIN);
-        topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
-        topBar.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2,
-                Styles.PADDING_MD, Styles.PADDING_LG * 2));
+        // ===== BANDEAU STATUS en haut =====
+        playlistsStatusLabel = new JLabel(" ");
+        playlistsStatusLabel.setFont(Styles.FONT_SMALL_BOLD);
+        playlistsStatusLabel.setForeground(new Color(22, 163, 74));
+        playlistsStatusLabel.setOpaque(true);
+        playlistsStatusLabel.setBackground(Styles.BG_ALT);
+        playlistsStatusLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(220, 225, 230)),
+                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_LG,
+                        Styles.PADDING_SM, Styles.PADDING_LG)));
+        card.add(playlistsStatusLabel, BorderLayout.NORTH);
 
-        JLabel titre = Styles.titleLabel("Mes playlists");
-        titre.setAlignmentX(Component.LEFT_ALIGNMENT);
-        topBar.add(titre);
-        topBar.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        // ===== SPLIT : liste gauche | détail droit =====
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
+        split.setBorder(null);
+        split.setDividerSize(1);
+        split.setBackground(new Color(220, 225, 230));
+        split.setResizeWeight(0.0);
 
-        // Bouton Nouvelle playlist
-        JButton btnNew = Styles.primaryButton("+ Nouvelle playlist");
-        btnNew.setAlignmentX(Component.LEFT_ALIGNMENT);
-        btnNew.setMaximumSize(new Dimension(200, 40));
+        // ---- Panneau GAUCHE : liste des playlists ----
+        JPanel leftOuter = new JPanel(new BorderLayout());
+        leftOuter.setBackground(Styles.BG_ALT);
+        leftOuter.setPreferredSize(new Dimension(280, 0));
+        leftOuter.setMinimumSize(new Dimension(240, 0));
+
+        // Header gauche
+        JPanel leftTop = new JPanel();
+        leftTop.setBackground(Styles.BG_ALT);
+        leftTop.setLayout(new BoxLayout(leftTop, BoxLayout.Y_AXIS));
+
+        JPanel leftHeader = new JPanel(new BorderLayout());
+        leftHeader.setBackground(Styles.BG_ALT);
+        leftHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+        leftHeader.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                Styles.PADDING_MD, Styles.PADDING_LG));
+        JLabel titreGauche = Styles.subtitleLabel("Mes playlists");
+        leftHeader.add(titreGauche, BorderLayout.CENTER);
+        JButton btnNew = Styles.primaryButton("+ Nouvelle");
+        btnNew.setFont(Styles.FONT_SMALL_BOLD);
         btnNew.addActionListener(e -> {
+            // Pousser "new" pour débloquer afficherMenuPlaylist() → case 1 → creerPlaylist()
+            // Le formulaire inline sera affiché par demanderNomPlaylist()
             try { playlistsQueue.put("new"); } catch (InterruptedException ignored) {}
         });
-        topBar.add(btnNew);
-        topBar.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        leftHeader.add(btnNew, BorderLayout.EAST);
+        leftTop.add(leftHeader);
 
-        playlistsStatusLabel = new JLabel(" ");
-        playlistsStatusLabel.setFont(Styles.FONT_SMALL);
-        playlistsStatusLabel.setForeground(new Color(22, 163, 74));
-        playlistsStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        topBar.add(playlistsStatusLabel);
+        // Formulaire inline (caché par défaut)
+        playlistsFormPanel = new JPanel(new BorderLayout(Styles.PADDING_SM, 0));
+        playlistsFormPanel.setBackground(new Color(240, 248, 248));
+        playlistsFormPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 1, 0, Styles.TEAL),
+                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_LG,
+                        Styles.PADDING_SM, Styles.PADDING_LG)));
+        playlistsFormPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        playlistsFormPanel.setVisible(false);
 
-        JPanel topBarWrapper2 = new JPanel(new BorderLayout());
-        topBarWrapper2.setBackground(Styles.BG_MAIN);
-        topBarWrapper2.add(topBar, BorderLayout.CENTER);
-        topBarWrapper2.add(buildFloatingNotesPanel(), BorderLayout.EAST);
-        card.add(topBarWrapper2, BorderLayout.NORTH);
+        playlistsFormTitle = new JLabel("Nouvelle playlist");
+        playlistsFormTitle.setFont(Styles.FONT_SMALL_BOLD);
+        playlistsFormTitle.setForeground(Styles.TEAL_DARK);
 
-        // ---- Zone scrollable ----
-        playlistsContentArea = new JPanel();
-        playlistsContentArea.setBackground(Styles.BG_MAIN);
-        playlistsContentArea.setLayout(new BoxLayout(playlistsContentArea, BoxLayout.Y_AXIS));
-        playlistsContentArea.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2,
-                Styles.PADDING_LG, Styles.PADDING_LG * 2));
+        playlistsFormField = new JTextField();
+        playlistsFormField.setFont(Styles.FONT_SMALL);
+        playlistsFormField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
 
-        JPanel playlistsWrapper = new JPanel(new BorderLayout());
-        playlistsWrapper.setBackground(Styles.BG_MAIN);
-        playlistsWrapper.add(playlistsContentArea, BorderLayout.NORTH);
+        JPanel formBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        formBtns.setOpaque(false);
+        JButton btnValiderForm = Styles.primaryButton("OK");
+        btnValiderForm.setFont(Styles.FONT_SMALL_BOLD);
+        btnValiderForm.setPreferredSize(new Dimension(44, 28));
+        JButton btnAnnulerForm = Styles.secondaryButton("✕");
+        btnAnnulerForm.setFont(Styles.FONT_SMALL);
+        btnAnnulerForm.setPreferredSize(new Dimension(36, 28));
+        formBtns.add(btnValiderForm);
+        formBtns.add(btnAnnulerForm);
 
-        JScrollPane scroll = new JScrollPane(playlistsWrapper);
-        scroll.setBorder(null);
-        scroll.getViewport().setBackground(Styles.BG_MAIN);
-        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        card.add(scroll, BorderLayout.CENTER);
+        JPanel formCenter = new JPanel(new BorderLayout(4, 2));
+        formCenter.setOpaque(false);
+        formCenter.add(playlistsFormTitle, BorderLayout.NORTH);
+        formCenter.add(playlistsFormField, BorderLayout.CENTER);
+        playlistsFormPanel.add(formCenter, BorderLayout.CENTER);
+        playlistsFormPanel.add(formBtns, BorderLayout.EAST);
 
+        // Valider : pousser le texte dans playlistsNomQueue
+        Runnable validerForm = () -> {
+            String val = playlistsFormField.getText().trim();
+            if (!val.isEmpty()) {
+                playlistsFormPanel.setVisible(false);
+                playlistsFormField.setText("");
+                try { playlistsNomQueue.put(val); } catch (InterruptedException ignored) {}
+            }
+        };
+        btnValiderForm.addActionListener(e -> validerForm.run());
+        playlistsFormField.addActionListener(e -> validerForm.run()); // Entrée = valider
+
+        btnAnnulerForm.addActionListener(e -> {
+            playlistsFormPanel.setVisible(false);
+            playlistsFormField.setText("");
+            try { playlistsNomQueue.put(""); } catch (InterruptedException ignored) {}
+        });
+
+        leftTop.add(playlistsFormPanel);
+        leftOuter.add(leftTop, BorderLayout.NORTH);
+
+        // Zone liste scrollable
+        playlistsListPanel = new JPanel();
+        playlistsListPanel.setBackground(Styles.BG_ALT);
+        playlistsListPanel.setLayout(new BoxLayout(playlistsListPanel, BoxLayout.Y_AXIS));
+        playlistsListPanel.setBorder(new EmptyBorder(0, Styles.PADDING_SM, Styles.PADDING_SM, Styles.PADDING_SM));
+
+        ScrollablePanel listWrapper = new ScrollablePanel();
+        listWrapper.setBackground(Styles.BG_ALT);
+        listWrapper.setLayout(new BoxLayout(listWrapper, BoxLayout.Y_AXIS));
+        listWrapper.add(playlistsListPanel);
+        listWrapper.add(Box.createVerticalGlue());
+
+        JScrollPane listScroll = new JScrollPane(listWrapper);
+        listScroll.setBorder(null);
+        listScroll.getViewport().setBackground(Styles.BG_ALT);
+        listScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        listScroll.getVerticalScrollBar().setUnitIncrement(16);
+        leftOuter.add(listScroll, BorderLayout.CENTER);
+
+        // ---- Panneau DROIT : détail de la playlist sélectionnée ----
+        playlistsDetailLayout = new CardLayout();
+        playlistsDetailPanel = new JPanel(playlistsDetailLayout);
+        playlistsDetailPanel.setBackground(Styles.BG_MAIN);
+
+        // Carte vide (aucune playlist sélectionnée)
+        JPanel accueilDetail = new JPanel(new GridBagLayout());
+        accueilDetail.setBackground(Styles.BG_MAIN);
+        JLabel hintDetail = new JLabel("\u2190  S\u00e9lectionnez une playlist");
+        hintDetail.setFont(Styles.FONT_BODY);
+        hintDetail.setForeground(Styles.TEXT_MUTED);
+        accueilDetail.add(hintDetail);
+        playlistsDetailPanel.add(accueilDetail, "accueil");
+        playlistsDetailLayout.show(playlistsDetailPanel, "accueil");
+
+        split.setLeftComponent(leftOuter);
+        split.setRightComponent(playlistsDetailPanel);
+        card.add(split, BorderLayout.CENTER);
         return card;
     }
 
-    /**
-     * Repeuple la zone playlists avec les playlists fournies.
-     * Chaque carte playlist a 3 boutons : Voir/Écouter, Ajouter morceau, Supprimer.
-     */
+    /** Reconstruit le panneau gauche avec la liste des playlists. */
     private void refreshPlaylistsUI(List<model.Playlist> playlists) {
         playlistsCourantes = playlists;
         runOnEdt(() -> {
-            playlistsContentArea.removeAll();
-
+            playlistsListPanel.removeAll();
             if (playlists.isEmpty()) {
-                JLabel vide = Styles.mutedLabel("Aucune playlist pour le moment. Cliquez sur \u00ab\u00a0+ Nouvelle playlist\u00a0\u00bb pour commencer.");
+                JLabel vide = Styles.mutedLabel("Aucune playlist.\nCliquez sur + Nouvelle.");
+                vide.setFont(Styles.FONT_SMALL);
                 vide.setAlignmentX(Component.LEFT_ALIGNMENT);
-                vide.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, 0, 0));
-                playlistsContentArea.add(vide);
+                vide.setBorder(new EmptyBorder(Styles.PADDING_MD, Styles.PADDING_SM, 0, 0));
+                playlistsListPanel.add(vide);
+                // Côté droit : hint
+                playlistsDetailLayout.show(playlistsDetailPanel, "accueil");
+                playlistSelectionnee = null;
             } else {
                 for (model.Playlist p : playlists) {
-                    playlistsContentArea.add(buildPlaylistRow(p));
-                    playlistsContentArea.add(Box.createVerticalStrut(Styles.PADDING_SM));
+                    playlistsListPanel.add(buildPlaylistSideItem(p));
+                    playlistsListPanel.add(Box.createVerticalStrut(2));
+                }
+                // Si une playlist était sélectionnée, rafraîchir son détail
+                if (playlistSelectionnee != null) {
+                    model.Playlist updated = playlists.stream()
+                            .filter(p -> p.getId() == playlistSelectionnee.getId())
+                            .findFirst().orElse(null);
+                    if (updated != null) showPlaylistDetail(updated);
                 }
             }
-            playlistsContentArea.revalidate();
-            playlistsContentArea.repaint();
+            playlistsListPanel.revalidate();
+            playlistsListPanel.repaint();
         });
     }
 
-    private JPanel buildPlaylistRow(model.Playlist p) {
-        JPanel row = Styles.cardPanel();
-        row.setLayout(new BorderLayout(Styles.PADDING_MD, 0));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
-        row.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
-                row.setBackground(Styles.TEAL_SURFACE);
-            }
-            @Override public void mouseExited(java.awt.event.MouseEvent e) {
-                row.setBackground(Styles.BG_ALT);
-            }
-        });
+    /** Construit une entrée de playlist dans le panneau gauche. */
+    private JPanel buildPlaylistSideItem(model.Playlist p) {
+        boolean selected = playlistSelectionnee != null && playlistSelectionnee.getId() == p.getId();
+        JPanel item = new JPanel(new BorderLayout());
+        item.setBackground(selected ? Styles.TEAL_SURFACE : Styles.BG_ALT);
+        item.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, selected ? 3 : 0, 0, 0, Styles.TEAL),
+                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD,
+                        Styles.PADDING_SM, Styles.PADDING_SM)));
+        item.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        item.setMaximumSize(new Dimension(Integer.MAX_VALUE, 56));
 
-        // Infos
         JPanel info = new JPanel();
         info.setOpaque(false);
         info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
         JLabel nom = new JLabel(p.getNom());
-        nom.setFont(Styles.FONT_BODY_BOLD);
+        nom.setFont(Styles.FONT_SMALL_BOLD);
         nom.setForeground(Styles.TEXT);
         JLabel details = new JLabel(p.getMorceaux().size() + " morceau(x)  \u2022  " + p.getDureeTotaleFormatee());
-        details.setFont(Styles.FONT_SMALL);
+        details.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.PLAIN, 11));
         details.setForeground(Styles.TEXT_MUTED);
         info.add(nom);
         info.add(details);
-        row.add(info, BorderLayout.CENTER);
+        item.add(info, BorderLayout.CENTER);
 
-        // Actions
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, Styles.PADDING_SM, 0));
-        actions.setOpaque(false);
-
-        JButton btnVoir = Styles.secondaryButton("Voir");
-        btnVoir.setFont(Styles.FONT_SMALL);
-        btnVoir.addActionListener(e -> {
-            try { playlistsQueue.put("voir:" + p.getId()); } catch (InterruptedException ignored) {}
+        item.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                playlistSelectionnee = p;
+                showPlaylistDetail(p);
+                // Rafraîchir la sélection visuelle
+                refreshPlaylistsUI(playlistsCourantes);
+            }
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (playlistSelectionnee == null || playlistSelectionnee.getId() != p.getId())
+                    item.setBackground(new Color(240, 248, 248));
+            }
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                if (playlistSelectionnee == null || playlistSelectionnee.getId() != p.getId())
+                    item.setBackground(Styles.BG_ALT);
+            }
         });
-
-        JButton btnAjouter = Styles.primaryButton("+ Morceau");
-        btnAjouter.setFont(Styles.FONT_SMALL);
-        btnAjouter.addActionListener(e -> {
-            try { playlistsQueue.put("ajouter:" + p.getId()); } catch (InterruptedException ignored) {}
-        });
-
-        JButton btnSuppr = Styles.dangerButton("Supprimer");
-        btnSuppr.setFont(Styles.FONT_SMALL);
-        btnSuppr.addActionListener(e -> {
-            try { playlistsQueue.put("supprimer:" + p.getId()); } catch (InterruptedException ignored) {}
-        });
-
-        actions.add(btnVoir);
-        actions.add(btnAjouter);
-        actions.add(btnSuppr);
-        row.add(actions, BorderLayout.EAST);
-
-        return row;
+        return item;
     }
+
+    /** Affiche le détail d'une playlist dans le panneau droit. */
+    /** Affiche le formulaire inline dans le panneau gauche.
+     *  mode = "new" (créer) ou "rename" (renommer). */
+    private void showPlaylistForm(String mode, String valeurInitiale) {
+        if (playlistsFormPanel == null) return;
+        playlistsFormTitle.setText("new".equals(mode) ? "Nom de la nouvelle playlist" : "Nouveau nom");
+        playlistsFormField.setText(valeurInitiale);
+        playlistsFormPanel.setVisible(true);
+        playlistsFormPanel.revalidate();
+        playlistsFormPanel.repaint();
+        playlistsFormField.requestFocusInWindow();
+        playlistsFormField.selectAll();
+        // Si appelé depuis le bouton "+ Nouvelle", pousser "new" dans playlistsQueue
+        if ("new".equals(mode)) {
+            // On ne pousse pas ici : le bouton btnNew le fera via addActionListener
+            // mais dans ce cas c'est demanderNomPlaylist() qui appelle showPlaylistForm
+            // → pas besoin de pousser dans playlistsQueue ici
+        }
+    }
+
+    private void showPlaylistDetail(model.Playlist p) {
+        // Construire le panneau de détail
+        JPanel detail = new JPanel(new BorderLayout());
+        detail.setBackground(Styles.BG_MAIN);
+        detail.setName("detail");
+
+        // Header
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(Styles.BG_MAIN);
+        header.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                Styles.PADDING_MD, Styles.PADDING_LG));
+
+        JPanel headerLeft = new JPanel();
+        headerLeft.setOpaque(false);
+        headerLeft.setLayout(new BoxLayout(headerLeft, BoxLayout.Y_AXIS));
+        JLabel nom = Styles.subtitleLabel(p.getNom());
+        JLabel infos = Styles.mutedLabel(p.getMorceaux().size() + " morceau(x)  \u2022  " + p.getDureeTotaleFormatee());
+        infos.setFont(Styles.FONT_SMALL);
+        headerLeft.add(nom);
+        headerLeft.add(Box.createVerticalStrut(2));
+        headerLeft.add(infos);
+        header.add(headerLeft, BorderLayout.CENTER);
+
+        // Boutons d'action sur la playlist
+        JPanel actionBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT, Styles.PADDING_SM, 0));
+        actionBtns.setOpaque(false);
+
+        JButton btnAjouter   = Styles.primaryButton("+ Ajouter morceau");
+        JButton btnRetirer   = Styles.secondaryButton("\u2212 Retirer morceau");
+        JButton btnEcouter   = Styles.primaryButton("\u25B6 \u00c9couter");
+        JButton btnRenommer  = Styles.secondaryButton("Renommer");
+        JButton btnSupprimer = Styles.dangerButton("Supprimer");
+
+        for (JButton b : new JButton[]{btnAjouter, btnRetirer, btnEcouter, btnRenommer, btnSupprimer})
+            b.setFont(Styles.FONT_SMALL);
+
+        btnAjouter .addActionListener(e -> { try { playlistsQueue.put("ajouter:"  + p.getId()); } catch (InterruptedException ignored) {} });
+        btnRetirer .addActionListener(e -> { try { playlistsQueue.put("retirer:"  + p.getId()); } catch (InterruptedException ignored) {} });
+        btnEcouter .addActionListener(e -> { try { playlistsQueue.put("ecouter:"  + p.getId()); } catch (InterruptedException ignored) {} });
+        btnRenommer.addActionListener(e -> { try { playlistsQueue.put("renommer:" + p.getId()); } catch (InterruptedException ignored) {} });
+        btnSupprimer.addActionListener(e -> { try { playlistsQueue.put("supprimer:" + p.getId()); } catch (InterruptedException ignored) {} });
+
+        actionBtns.add(btnAjouter);
+        actionBtns.add(btnRetirer);
+        actionBtns.add(btnEcouter);
+        actionBtns.add(btnRenommer);
+        actionBtns.add(btnSupprimer);
+        header.add(actionBtns, BorderLayout.SOUTH);
+        detail.add(header, BorderLayout.NORTH);
+
+        // Liste des morceaux
+        JPanel morceauxPanel = new JPanel();
+        morceauxPanel.setBackground(Styles.BG_MAIN);
+        morceauxPanel.setLayout(new BoxLayout(morceauxPanel, BoxLayout.Y_AXIS));
+        morceauxPanel.setBorder(new EmptyBorder(0, Styles.PADDING_LG, Styles.PADDING_LG, Styles.PADDING_LG));
+
+        List<model.Morceau> morceaux = p.getMorceaux();
+        if (morceaux.isEmpty()) {
+            JLabel vide = Styles.mutedLabel("Aucun morceau dans cette playlist.");
+            vide.setAlignmentX(Component.LEFT_ALIGNMENT);
+            morceauxPanel.add(vide);
+        } else {
+            // En-tête
+            JPanel colHeader = new JPanel(new java.awt.GridLayout(1, 3, Styles.PADDING_MD, 0));
+            colHeader.setBackground(Styles.TEAL_SURFACE);
+            colHeader.setBorder(BorderFactory.createEmptyBorder(6, 14, 6, 14));
+            colHeader.setPreferredSize(new Dimension(0, 30));
+            colHeader.setMinimumSize(new Dimension(0, 30));
+            colHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+            for (String col : new String[]{"#", "Titre / Artiste", "Dur\u00e9e"}) {
+                JLabel h = new JLabel(col);
+                h.setFont(Styles.FONT_SMALL_BOLD);
+                h.setForeground(Styles.TEAL_DARK);
+                colHeader.add(h);
+            }
+            morceauxPanel.add(colHeader);
+            morceauxPanel.add(Box.createVerticalStrut(2));
+
+            int num = 1;
+            for (model.Morceau m : morceaux) {
+                JPanel row = new JPanel(new java.awt.GridLayout(1, 3, Styles.PADDING_MD, 0));
+                boolean alt = (num % 2 == 0);
+                row.setBackground(alt ? Styles.BG_ALT : Styles.BG_MAIN);
+                row.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(235, 238, 240)),
+                        BorderFactory.createEmptyBorder(8, 14, 8, 14)));
+                row.setPreferredSize(new Dimension(0, 40));
+                row.setMinimumSize(new Dimension(0, 40));
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+                JLabel lblNum = new JLabel(String.valueOf(num++));
+                lblNum.setFont(Styles.FONT_SMALL);
+                lblNum.setForeground(Styles.TEXT_MUTED);
+
+                JLabel lblTitre = new JLabel(m.getTitre());
+                lblTitre.setFont(Styles.FONT_SMALL_BOLD);
+                lblTitre.setForeground(Styles.TEXT);
+
+                int sec = m.getDuree();
+                JLabel lblDuree = new JLabel(sec / 60 + ":" + String.format("%02d", sec % 60));
+                lblDuree.setFont(Styles.FONT_SMALL);
+                lblDuree.setForeground(Styles.TEXT_MUTED);
+
+                row.add(lblNum);
+                row.add(lblTitre);
+                row.add(lblDuree);
+                morceauxPanel.add(row);
+            }
+        }
+
+        ScrollablePanel detailWrapper = new ScrollablePanel();
+        detailWrapper.setBackground(Styles.BG_MAIN);
+        detailWrapper.setLayout(new BoxLayout(detailWrapper, BoxLayout.Y_AXIS));
+        detailWrapper.add(morceauxPanel);
+        detailWrapper.add(Box.createVerticalGlue());
+
+        JScrollPane detailScroll = new JScrollPane(detailWrapper);
+        detailScroll.setBorder(null);
+        detailScroll.getViewport().setBackground(Styles.BG_MAIN);
+        detailScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        detailScroll.getVerticalScrollBar().setUnitIncrement(16);
+        detail.add(detailScroll, BorderLayout.CENTER);
+
+        // Remplacer la carte "detail" dans le CardLayout
+        for (Component c : playlistsDetailPanel.getComponents()) {
+            if ("detail".equals(c.getName())) {
+                playlistsDetailPanel.remove(c);
+                break;
+            }
+        }
+        detail.setName("detail");
+        playlistsDetailPanel.add(detail, "detail");
+        playlistsDetailLayout.show(playlistsDetailPanel, "detail");
+        playlistsDetailPanel.revalidate();
+        playlistsDetailPanel.repaint();
+    }
+
+    // ==================== CARTE ÉCOUTE ====================
 
     // ==================== CARTE ÉCOUTE ====================
 
@@ -1445,9 +1805,11 @@ public final class VueGraphique extends VueConsole {
         ecouteContentArea.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2,
                 Styles.PADDING_MD, Styles.PADDING_LG * 2));
 
-        JPanel ecouteWrapper = new JPanel(new BorderLayout());
+        ScrollablePanel ecouteWrapper = new ScrollablePanel();
         ecouteWrapper.setBackground(Styles.BG_MAIN);
-        ecouteWrapper.add(ecouteContentArea, BorderLayout.NORTH);
+        ecouteWrapper.setLayout(new BoxLayout(ecouteWrapper, BoxLayout.Y_AXIS));
+        ecouteWrapper.add(ecouteContentArea);
+        ecouteWrapper.add(Box.createVerticalGlue());
 
         JScrollPane scroll = new JScrollPane(ecouteWrapper);
         scroll.setBorder(null);
@@ -1541,9 +1903,11 @@ public final class VueGraphique extends VueConsole {
         historiqueContentArea.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2,
                 Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
-        JPanel historiqueWrapper = new JPanel(new BorderLayout());
+        ScrollablePanel historiqueWrapper = new ScrollablePanel();
         historiqueWrapper.setBackground(Styles.BG_MAIN);
-        historiqueWrapper.add(historiqueContentArea, BorderLayout.NORTH);
+        historiqueWrapper.setLayout(new BoxLayout(historiqueWrapper, BoxLayout.Y_AXIS));
+        historiqueWrapper.add(historiqueContentArea);
+        historiqueWrapper.add(Box.createVerticalGlue());
 
         JScrollPane scroll = new JScrollPane(historiqueWrapper);
         scroll.setBorder(null);
@@ -1584,143 +1948,761 @@ public final class VueGraphique extends VueConsole {
     // Références aux composants mis à jour dynamiquement
     private JPanel adminCatalogueContent;
     private JLabel adminCatalogueStatus;   // bandeau de feedback en haut de la carte admin
+    private JButton btnAnnulerSuppression; // bouton Annuler affiché pendant une suppression
     private JPanel adminComptesContent;
     private JLabel adminComptesStatus;
     private JPanel adminStatsCard;   // le JPanel complet de la carte statistiques
+
+    // ==================== FORMULAIRES ADMIN INLINE ====================
+    //
+    // Chaque action admin (ajouter morceau, supprimer album, etc.) affiche
+    // un formulaire dans le panneau droit de la carte gestionCatalogue.
+    // Les méthodes demanderXxx() bloquent sur formulaireQueue jusqu'à ce que
+    // le formulaire soit validé (bouton Valider) ou annulé (bouton Annuler).
+    //
+    // Sélecteur artiste/groupe : deux radio buttons permettent de choisir
+    // entre sélectionner un existant (JComboBox) ou créer un nouveau (champs inline).
+    // Dans les deux cas la valeur finale est résolue avant d'être poussée dans la queue.
+
+    /** Queue unique pour tous les champs de formulaire admin. Chaque demanderXxx()
+     *  consomme exactement un élément. L'annulation pousse CANCEL_SENTINEL. */
+    private final java.util.concurrent.LinkedBlockingQueue<Object> formulaireQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+
+    /** Sentinel pour l'annulation dans formulaireQueue. */
+    private static final Object CANCEL_SENTINEL = new Object();
+
+    /** Panneau droit du split-pane admin, contient le formulaire contextuel. */
+    private JPanel adminFormulairePanel;
+    /** CardLayout du panneau formulaire. */
+    private CardLayout adminFormulaireLayout;
 
     // ---- Carte : Gérer le catalogue ----
     private JPanel buildAdminCatalogueCard() {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(Styles.BG_MAIN);
 
-        // ========== HEADER : titre + bandeau de feedback ==========
-        JPanel top = new JPanel();
-        top.setBackground(Styles.BG_MAIN);
-        top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
-        top.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2,
-                Styles.PADDING_MD, Styles.PADDING_LG * 2));
+        // ===== BANDEAU STATUS en haut (label + bouton Annuler) =====
+        JPanel statusBar = new JPanel(new BorderLayout());
+        statusBar.setBackground(Styles.BG_ALT);
+        statusBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(220, 225, 230)),
+                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_LG,
+                        Styles.PADDING_SM, Styles.PADDING_LG)));
 
-        JLabel titre = Styles.titleLabel("G\u00e9rer le catalogue");
-        titre.setAlignmentX(Component.LEFT_ALIGNMENT);
-        top.add(titre);
-        top.add(Box.createVerticalStrut(Styles.PADDING_SM));
-
-        JLabel sub = Styles.mutedLabel(
-                "Ajoutez ou supprimez des \u00e9l\u00e9ments du catalogue. " +
-                        "Cliquez directement sur \u00ab\u00a0\u2212 Supprimer\u00a0\u00bb dans la liste pour supprimer sans saisir d\u2019ID.");
-        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
-        top.add(sub);
-        top.add(Box.createVerticalStrut(Styles.PADDING_MD));
-
-        // Bandeau de feedback permanent (message d'état de la dernière action)
         adminCatalogueStatus = new JLabel(" ");
         adminCatalogueStatus.setFont(Styles.FONT_SMALL_BOLD);
         adminCatalogueStatus.setForeground(Styles.TEXT_MUTED);
-        adminCatalogueStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
-        adminCatalogueStatus.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 4, 0, 0, Styles.TEAL),
-                BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD, Styles.PADDING_SM, Styles.PADDING_MD)));
-        adminCatalogueStatus.setOpaque(true);
-        adminCatalogueStatus.setBackground(Styles.BG_ALT);
-        adminCatalogueStatus.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-        top.add(adminCatalogueStatus);
-        top.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        statusBar.add(adminCatalogueStatus, BorderLayout.CENTER);
 
-        // ========== ACTIONS PAR SECTION ==========
-        JPanel sectionsPanel = new JPanel();
-        sectionsPanel.setBackground(Styles.BG_MAIN);
-        sectionsPanel.setLayout(new BoxLayout(sectionsPanel, BoxLayout.Y_AXIS));
-        sectionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnAnnulerSuppression = Styles.secondaryButton("\u00d7  Annuler");
+        btnAnnulerSuppression.setFont(Styles.FONT_SMALL);
+        btnAnnulerSuppression.setVisible(false);
+        btnAnnulerSuppression.addActionListener(e -> {
+            suppressionDirecteQueue.offer(CANCEL_INT);
+            btnAnnulerSuppression.setVisible(false);
+            resetAdminCatalogueMsg();
+            if (adminCatalogueContent != null) {
+                adminCatalogueContent.removeAll();
+                adminCatalogueContent.revalidate();
+                adminCatalogueContent.repaint();
+            }
+            adminFormulaireLayout.show(adminFormulairePanel, "accueil");
+        });
+        statusBar.add(btnAnnulerSuppression, BorderLayout.EAST);
+        card.add(statusBar, BorderLayout.NORTH);
 
-        sectionsPanel.add(buildAdminSection("Morceaux", new String[][]{
-                {"+ Ajouter un morceau",   "ajouterMorceau"},
-                {"\u2212 Supprimer un morceau", "supprimerMorceau"},
+        // ===== SPLIT : menu gauche | formulaire droit =====
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
+        split.setBorder(null);
+        split.setDividerSize(1);
+        split.setBackground(new Color(220, 225, 230));
+        split.setResizeWeight(0.0);
+
+        // ---- Panneau GAUCHE : menu des actions ----
+        JPanel leftPanel = new JPanel();
+        leftPanel.setBackground(Styles.BG_ALT);
+        leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
+        leftPanel.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                Styles.PADDING_LG, Styles.PADDING_LG));
+        leftPanel.setPreferredSize(new Dimension(280, 0));
+        leftPanel.setMinimumSize(new Dimension(260, 0));
+
+        JLabel titreMenu = Styles.subtitleLabel("Catalogue");
+        titreMenu.setAlignmentX(Component.LEFT_ALIGNMENT);
+        leftPanel.add(titreMenu);
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        JLabel subMenu = Styles.mutedLabel("Choisissez une action");
+        subMenu.setFont(Styles.FONT_SMALL);
+        subMenu.setAlignmentX(Component.LEFT_ALIGNMENT);
+        leftPanel.add(subMenu);
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_LG));
+
+        // Sections de boutons
+        leftPanel.add(buildAdminMenuSection("Morceaux", new String[][]{
+                {"+ Ajouter un morceau",       "ajouterMorceau"},
+                {"\u2212 Supprimer un morceau","supprimerMorceau"},
         }));
-        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        sectionsPanel.add(buildAdminSection("Albums", new String[][]{
-                {"+ Ajouter un album",     "ajouterAlbum"},
-                {"\u2212 Supprimer un album",   "supprimerAlbum"},
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        leftPanel.add(buildAdminMenuSection("Albums", new String[][]{
+                {"+ Ajouter un album",         "ajouterAlbum"},
+                {"\u2212 Supprimer un album",  "supprimerAlbum"},
         }));
-        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        sectionsPanel.add(buildAdminSection("Artistes", new String[][]{
-                {"+ Ajouter un artiste",   "ajouterArtiste"},
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        leftPanel.add(buildAdminMenuSection("Artistes", new String[][]{
+                {"+ Ajouter un artiste",        "ajouterArtiste"},
                 {"\u2212 Supprimer un artiste", "supprimerArtiste"},
         }));
-        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        sectionsPanel.add(buildAdminSection("Groupes", new String[][]{
-                {"+ Ajouter un groupe",    "ajouterGroupe"},
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        leftPanel.add(buildAdminMenuSection("Groupes", new String[][]{
+                {"+ Ajouter un groupe",         "ajouterGroupe"},
                 {"\u2212 Supprimer un groupe",  "supprimerGroupe"},
         }));
-        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        sectionsPanel.add(buildAdminSection("Associations", new String[][]{
-                {"Ajouter un morceau dans un album",   "ajouterMorceauAlbum"},
-                {"Ajouter un membre dans un groupe",   "ajouterMembreGroupe"},
+        leftPanel.add(Box.createVerticalStrut(Styles.PADDING_MD));
+        leftPanel.add(buildAdminMenuSection("Associations", new String[][]{
+                {"Morceau \u2192 Album",        "ajouterMorceauAlbum"},
+                {"Artiste \u2192 Groupe",       "ajouterMembreGroupe"},
         }));
+        leftPanel.add(Box.createVerticalGlue());
 
-        top.add(sectionsPanel);
+        // ---- Panneau DROIT : formulaires contextuels (CardLayout) ----
+        adminFormulaireLayout = new CardLayout();
+        adminFormulairePanel  = new JPanel(adminFormulaireLayout);
+        adminFormulairePanel.setBackground(Styles.BG_MAIN);
 
-        JPanel topBarWrapperAdm = new JPanel(new BorderLayout());
-        topBarWrapperAdm.setBackground(Styles.BG_MAIN);
-        topBarWrapperAdm.add(top, BorderLayout.CENTER);
-        topBarWrapperAdm.add(buildFloatingNotesPanel(), BorderLayout.EAST);
-        card.add(topBarWrapperAdm, BorderLayout.NORTH);
+        // Carte d'accueil (aucune action sélectionnée)
+        JPanel accueilForm = new JPanel(new GridBagLayout());
+        accueilForm.setBackground(Styles.BG_MAIN);
+        JLabel hint = new JLabel("\u2190  S\u00e9lectionnez une action dans le menu");
+        hint.setFont(Styles.FONT_BODY);
+        hint.setForeground(Styles.TEXT_MUTED);
+        accueilForm.add(hint);
+        adminFormulairePanel.add(accueilForm, "accueil");
 
-        // ========== ZONE DE LISTE CONTEXTUELLE (scrollable) ==========
-        // C'est dans cette zone que s'affichent les listes de morceaux/albums/...
-        // quand le contrôleur appelle vue.afficherListeMorceaux(...) pendant
-        // un flux admin (ex : suppression, ajout dans album).
+        // Zone de liste contextuelle (suppression / associations)
         adminCatalogueContent = new JPanel();
         adminCatalogueContent.setBackground(Styles.BG_MAIN);
         adminCatalogueContent.setLayout(new BoxLayout(adminCatalogueContent, BoxLayout.Y_AXIS));
-        adminCatalogueContent.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2,
-                Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
-        JPanel wrapper = new JPanel(new BorderLayout());
-        wrapper.setBackground(Styles.BG_MAIN);
-        wrapper.add(adminCatalogueContent, BorderLayout.NORTH);
+        ScrollablePanel listWrapper = new ScrollablePanel();
+        listWrapper.setBackground(Styles.BG_MAIN);
+        listWrapper.setLayout(new BoxLayout(listWrapper, BoxLayout.Y_AXIS));
+        listWrapper.add(adminCatalogueContent);
+        listWrapper.add(Box.createVerticalGlue());
+        JScrollPane listScroll = new JScrollPane(listWrapper);
+        listScroll.setBorder(null);
+        listScroll.getViewport().setBackground(Styles.BG_MAIN);
+        listScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        listScroll.getVerticalScrollBar().setUnitIncrement(16);
+        adminFormulairePanel.add(listScroll, "liste");
 
-        JScrollPane scroll = new JScrollPane(wrapper);
-        scroll.setBorder(null);
-        scroll.getViewport().setBackground(Styles.BG_MAIN);
-        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        card.add(scroll, BorderLayout.CENTER);
+        adminFormulaireLayout.show(adminFormulairePanel, "accueil");
+
+        split.setLeftComponent(leftPanel);
+        split.setRightComponent(adminFormulairePanel);
+        card.add(split, BorderLayout.CENTER);
 
         return card;
     }
 
-    /**
-     * Construit une section de boutons admin avec un sous-titre.
-     * Les boutons commençant par "\u2212" (moins) sont stylés en danger.
-     */
-    private JPanel buildAdminSection(String titre, String[][] actions) {
+    /** Construit une section du menu gauche admin (label + boutons empilés). */
+    private JPanel buildAdminMenuSection(String titre, String[][] actions) {
         JPanel section = new JPanel();
-        section.setBackground(Styles.BG_MAIN);
+        section.setBackground(Styles.BG_ALT);
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
         section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
 
-        JLabel lbl = new JLabel(titre);
-        lbl.setFont(Styles.FONT_SMALL_BOLD);
+        JLabel lbl = new JLabel(titre.toUpperCase());
+        lbl.setFont(new Font(Styles.FONT_SMALL_BOLD.getFamily(), Font.BOLD, 10));
         lbl.setForeground(Styles.TEXT_MUTED);
         lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        lbl.setBorder(new EmptyBorder(0, 2, Styles.PADDING_SM, 0));
+        lbl.setBorder(new EmptyBorder(0, 2, 4, 0));
         section.add(lbl);
-
-        JPanel grid = new JPanel(new GridLayout(1, actions.length, Styles.PADDING_MD, 0));
-        grid.setBackground(Styles.BG_MAIN);
-        grid.setAlignmentX(Component.LEFT_ALIGNMENT);
-        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
 
         for (String[] a : actions) {
             boolean isDanger = a[0].startsWith("\u2212");
-            JButton b = isDanger ? Styles.dangerButton(a[0]) : Styles.primaryButton(a[0]);
+            JButton b = new JButton(a[0]);
             b.setFont(Styles.FONT_SMALL);
+            b.setAlignmentX(Component.LEFT_ALIGNMENT);
+            b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+            b.setHorizontalAlignment(SwingConstants.LEFT);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            b.setFocusPainted(false);
+            b.setBorderPainted(false);
+            b.setOpaque(true);
+            b.setBackground(Styles.BG_ALT);
+            b.setForeground(isDanger ? Styles.DANGER : Styles.TEAL);
+            b.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 3, 0, 0, isDanger ? Styles.DANGER : Styles.BG_ALT),
+                    BorderFactory.createEmptyBorder(6, Styles.PADDING_SM, 6, Styles.PADDING_SM)));
+            b.addMouseListener(new java.awt.event.MouseAdapter() {
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    b.setBackground(isDanger ? new Color(255, 241, 241) : Styles.TEAL_SURFACE);
+                    b.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 3, 0, 0, isDanger ? Styles.DANGER : Styles.TEAL),
+                            BorderFactory.createEmptyBorder(6, Styles.PADDING_SM, 6, Styles.PADDING_SM)));
+                }
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    b.setBackground(Styles.BG_ALT);
+                    b.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 3, 0, 0, isDanger ? Styles.DANGER : Styles.BG_ALT),
+                            BorderFactory.createEmptyBorder(6, Styles.PADDING_SM, 6, Styles.PADDING_SM)));
+                }
+            });
             final String key = a[1];
-            b.addActionListener(e -> { try { adminQueue.put(key); } catch (InterruptedException ignored) {} });
-            grid.add(b);
+            b.addActionListener(e -> {
+                // Afficher le formulaire correspondant dans le panneau droit
+                showAdminFormulaire(key);
+                // Pousser dans adminQueue pour débloquer afficherMenuAdmin()
+                try { adminQueue.put(key); } catch (InterruptedException ignored) {}
+            });
+            section.add(b);
+            section.add(Box.createVerticalStrut(2));
         }
-        section.add(grid);
         return section;
+    }
+
+    /**
+     * Affiche le formulaire approprié dans le panneau droit de gestionCatalogue.
+     * Appelé depuis l'EDT lors du clic sur un bouton du menu gauche.
+     */
+    private void showAdminFormulaire(String key) {
+        // Pour les suppressions et associations : montrer la zone de liste
+        // (le contrôleur va appeler afficherListeXxx() puis demanderIdSuppression())
+        if (key.startsWith("supprimer") || key.equals("ajouterMorceauAlbum") || key.equals("ajouterMembreGroupe")) {
+            // Vider la liste et basculer sur la carte "liste"
+            if (adminCatalogueContent != null) {
+                adminCatalogueContent.removeAll();
+                adminCatalogueContent.revalidate();
+                adminCatalogueContent.repaint();
+            }
+            adminFormulaireLayout.show(adminFormulairePanel, "liste");
+        } else {
+            // Pour les ajouts : construire le formulaire inline
+            JPanel form = buildAdminForm(key);
+            // Retirer l'ancienne carte "form" si elle existe, puis l'ajouter
+            for (Component c : adminFormulairePanel.getComponents()) {
+                if ("form".equals(c.getName())) {
+                    adminFormulairePanel.remove(c);
+                    break;
+                }
+            }
+            form.setName("form");
+            adminFormulairePanel.add(form, "form");
+            adminFormulaireLayout.show(adminFormulairePanel, "form");
+            adminFormulairePanel.revalidate();
+            adminFormulairePanel.repaint();
+        }
+    }
+
+    /**
+     * Construit le formulaire inline pour une action d'ajout donnée.
+     * Le formulaire pousse les valeurs dans formulaireQueue dans l'ordre
+     * exact attendu par le contrôleur via les demanderXxx() overrides.
+     */
+    private JPanel buildAdminForm(String key) {
+        JPanel outer = new JPanel(new BorderLayout());
+        outer.setBackground(Styles.BG_MAIN);
+
+        JScrollPane scroll = new JScrollPane();
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(Styles.BG_MAIN);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+
+        JPanel form = new JPanel();
+        form.setBackground(Styles.BG_MAIN);
+        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG * 2,
+                Styles.PADDING_LG, Styles.PADDING_LG * 2));
+
+        // Titre du formulaire
+        String[] titreDesc = getFormTitreDesc(key);
+        JLabel titreLabel = Styles.subtitleLabel(titreDesc[0]);
+        titreLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        form.add(titreLabel);
+        form.add(Box.createVerticalStrut(4));
+        JLabel descLabel = Styles.mutedLabel(titreDesc[1]);
+        descLabel.setFont(Styles.FONT_SMALL);
+        descLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        form.add(descLabel);
+        form.add(Box.createVerticalStrut(Styles.PADDING_LG));
+
+        // Liste des champs selon l'action
+        List<Object[]> fields = getFormFields(key); // {label, type, ...}
+
+        // Référence aux composants pour collecte à la validation
+        List<Object[]> fieldRefs = new ArrayList<>(); // {type, composant(s)}
+
+        for (Object[] f : fields) {
+            String fieldType = (String) f[0];
+            String fieldLabel = (String) f[1];
+
+            JPanel row = buildFormRow(fieldType, fieldLabel, f, fieldRefs);
+            if (row != null) {
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                form.add(row);
+                form.add(Box.createVerticalStrut(Styles.PADDING_MD));
+            }
+        }
+
+        form.add(Box.createVerticalStrut(Styles.PADDING_SM));
+
+        // Séparateur
+        JSeparator sep = new JSeparator();
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setForeground(new Color(220, 225, 230));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
+        form.add(sep);
+        form.add(Box.createVerticalStrut(Styles.PADDING_MD));
+
+        // Boutons Valider / Annuler
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Styles.PADDING_SM, 0));
+        btnRow.setBackground(Styles.BG_MAIN);
+        btnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JButton btnValider  = Styles.primaryButton("Valider");
+        JButton btnAnnuler  = Styles.secondaryButton("Annuler");
+        btnValider.setFont(Styles.FONT_SMALL_BOLD);
+        btnAnnuler.setFont(Styles.FONT_SMALL);
+        btnRow.add(btnValider);
+        btnRow.add(btnAnnuler);
+        form.add(btnRow);
+
+        // Label d'erreur inline
+        JLabel errLabel = new JLabel(" ");
+        errLabel.setFont(Styles.FONT_SMALL);
+        errLabel.setForeground(Styles.DANGER);
+        errLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        form.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        form.add(errLabel);
+
+        // Action Valider : collecte + validation + push dans formulaireQueue
+        btnValider.addActionListener(e -> {
+            // Vider d'abord les éventuels résidus
+            formulaireQueue.clear();
+            List<Object> values = collectFormValues(fieldRefs, key, errLabel);
+            if (values == null) return; // erreur de validation
+
+            // Pousser toutes les valeurs dans l'ordre
+            for (Object v : values) {
+                formulaireQueue.offer(v);
+            }
+            // Revenir à l'accueil du formulaire
+            adminFormulaireLayout.show(adminFormulairePanel, "accueil");
+        });
+
+        // Action Annuler
+        btnAnnuler.addActionListener(e -> {
+            formulaireQueue.clear();
+            formulaireQueue.offer(CANCEL_SENTINEL);
+            adminFormulaireLayout.show(adminFormulairePanel, "accueil");
+            resetAdminCatalogueMsg();
+        });
+
+        scroll.setViewportView(form);
+        outer.add(scroll, BorderLayout.CENTER);
+        return outer;
+    }
+
+    /** Retourne titre + description pour chaque action. */
+    private String[] getFormTitreDesc(String key) {
+        switch (key) {
+            case "ajouterMorceau":  return new String[]{"Ajouter un morceau",  "Remplissez les informations du nouveau morceau."};
+            case "ajouterAlbum":    return new String[]{"Ajouter un album",    "Remplissez les informations du nouvel album."};
+            case "ajouterArtiste":  return new String[]{"Ajouter un artiste",  "Remplissez les informations du nouvel artiste."};
+            case "ajouterGroupe":   return new String[]{"Ajouter un groupe",   "Remplissez les informations du nouveau groupe."};
+            default:                return new String[]{"Action",              ""};
+        }
+    }
+
+    /**
+     * Retourne la liste des champs pour un formulaire donné.
+     * Format : {type, label, ...params optionnels}
+     * Types : "text", "number", "artiste_ou_groupe", "album_select", "morceau_select", "groupe_select"
+     */
+    private List<Object[]> getFormFields(String key) {
+        List<Object[]> fields = new ArrayList<>();
+        switch (key) {
+            case "ajouterMorceau":
+                fields.add(new Object[]{"text",             "Titre"});
+                fields.add(new Object[]{"number",           "Dur\u00e9e (en secondes)"});
+                fields.add(new Object[]{"text",             "Genre"});
+                fields.add(new Object[]{"number",           "Ann\u00e9e de sortie"});
+                fields.add(new Object[]{"artiste_ou_groupe","Interpr\u00e8te"});
+                break;
+            case "ajouterAlbum":
+                fields.add(new Object[]{"text",             "Titre"});
+                fields.add(new Object[]{"number",           "Ann\u00e9e de sortie"});
+                fields.add(new Object[]{"artiste_ou_groupe","Interpr\u00e8te"});
+                break;
+            case "ajouterArtiste":
+                fields.add(new Object[]{"text",  "Nom"});
+                fields.add(new Object[]{"text",  "Pr\u00e9nom"});
+                fields.add(new Object[]{"text",  "Nationalit\u00e9"});
+                break;
+            case "ajouterGroupe":
+                fields.add(new Object[]{"text",   "Nom du groupe"});
+                fields.add(new Object[]{"number", "Ann\u00e9e de cr\u00e9ation"});
+                fields.add(new Object[]{"text",   "Nationalit\u00e9"});
+                break;
+        }
+        return fields;
+    }
+
+    /**
+     * Construit un composant de saisie pour un champ.
+     * fieldRefs est enrichi avec {type, composant(s)} pour la collecte.
+     */
+    private JPanel buildFormRow(String fieldType, String fieldLabel,
+                                Object[] fieldDef, List<Object[]> fieldRefs) {
+        JPanel row = new JPanel();
+        row.setBackground(Styles.BG_MAIN);
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+
+        JLabel lbl = new JLabel(fieldLabel);
+        lbl.setFont(Styles.FONT_SMALL_BOLD);
+        lbl.setForeground(Styles.TEXT);
+        lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.add(lbl);
+        row.add(Box.createVerticalStrut(4));
+
+        switch (fieldType) {
+            case "text": {
+                JTextField tf = new JTextField();
+                tf.setFont(Styles.FONT_BODY);
+                tf.setMaximumSize(new Dimension(420, 36));
+                tf.setAlignmentX(Component.LEFT_ALIGNMENT);
+                styleTextField(tf);
+                row.add(tf);
+                fieldRefs.add(new Object[]{"text", tf});
+                break;
+            }
+            case "number": {
+                JTextField tf = new JTextField();
+                tf.setFont(Styles.FONT_BODY);
+                tf.setMaximumSize(new Dimension(200, 36));
+                tf.setAlignmentX(Component.LEFT_ALIGNMENT);
+                styleTextField(tf);
+                row.add(tf);
+                fieldRefs.add(new Object[]{"number", tf});
+                break;
+            }
+            case "artiste_ou_groupe": {
+                // Deux radio buttons : Artiste existant | Groupe existant | Nouvel artiste | Nouveau groupe
+                JPanel artGroupe = buildArtisteOuGroupeSelector();
+                artGroupe.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.add(artGroupe);
+                // Le sélecteur va s'auto-enregistrer; on stocke le panel
+                fieldRefs.add(new Object[]{"artiste_ou_groupe", artGroupe});
+                break;
+            }
+        }
+        return row;
+    }
+
+    /**
+     * Sélecteur "Interprète" avec 4 options en radio :
+     *  - Artiste existant → JComboBox peuplé
+     *  - Créer un nouvel artiste → 3 champs inline
+     *  - Groupe existant → JComboBox peuplé
+     *  - Créer un nouveau groupe → 3 champs inline
+     *
+     * Le panneau expose getSelectedArtisteId(), getSelectedGroupeId(),
+     * getNewArtisteData(), getNewGroupeData() via le client tag "selector".
+     */
+    private JPanel buildArtisteOuGroupeSelector() {
+        JPanel panel = new JPanel();
+        panel.setBackground(Styles.BG_MAIN);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setMaximumSize(new Dimension(500, 400));
+
+        // Fond teinté
+        panel.setOpaque(true);
+        panel.setBackground(Styles.BG_ALT);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(220, 225, 230), 1, true),
+                BorderFactory.createEmptyBorder(Styles.PADDING_MD, Styles.PADDING_MD,
+                        Styles.PADDING_MD, Styles.PADDING_MD)));
+
+        // ---- Radio buttons ----
+        ButtonGroup bg = new ButtonGroup();
+        JRadioButton rbArtisteEx  = new JRadioButton("Artiste existant");
+        JRadioButton rbArtisteNew = new JRadioButton("Cr\u00e9er un nouvel artiste");
+        JRadioButton rbGroupeEx   = new JRadioButton("Groupe existant");
+        JRadioButton rbGroupeNew  = new JRadioButton("Cr\u00e9er un nouveau groupe");
+
+        for (JRadioButton rb : new JRadioButton[]{rbArtisteEx, rbArtisteNew, rbGroupeEx, rbGroupeNew}) {
+            rb.setFont(Styles.FONT_SMALL);
+            rb.setBackground(Styles.BG_ALT);
+            rb.setForeground(Styles.TEXT);
+            bg.add(rb);
+        }
+        rbArtisteEx.setSelected(true);
+
+        JPanel radioRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT, Styles.PADDING_SM, 0));
+        radioRow1.setBackground(Styles.BG_ALT);
+        radioRow1.add(rbArtisteEx);
+        radioRow1.add(rbArtisteNew);
+        JPanel radioRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT, Styles.PADDING_SM, 0));
+        radioRow2.setBackground(Styles.BG_ALT);
+        radioRow2.add(rbGroupeEx);
+        radioRow2.add(rbGroupeNew);
+        panel.add(radioRow1);
+        panel.add(radioRow2);
+        panel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+
+        // ---- Zone dynamique (CardLayout) ----
+        CardLayout cl = new CardLayout();
+        JPanel dynamicZone = new JPanel(cl);
+        dynamicZone.setBackground(Styles.BG_ALT);
+        dynamicZone.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        // Carte : artiste existant
+        List<Artiste> artistes = Catalogue.getTousLesArtistes();
+        JComboBox<String> cbArtiste = new JComboBox<>();
+        cbArtiste.setFont(Styles.FONT_SMALL);
+        cbArtiste.setMaximumSize(new Dimension(380, 32));
+        if (artistes.isEmpty()) {
+            cbArtiste.addItem("(aucun artiste dans le catalogue)");
+        } else {
+            for (Artiste a : artistes) cbArtiste.addItem("[" + a.getId() + "] " + a.getNomComplet());
+        }
+        JPanel pArtisteEx = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pArtisteEx.setBackground(Styles.BG_ALT);
+        pArtisteEx.add(cbArtiste);
+        dynamicZone.add(pArtisteEx, "artiEx");
+
+        // Carte : nouvel artiste
+        JTextField tfNomA  = styledSmallField("Nom");
+        JTextField tfPrenA = styledSmallField("Pr\u00e9nom");
+        JTextField tfNatA  = styledSmallField("Nationalit\u00e9");
+        JPanel pArtisteNew = buildInlineFields(
+                new String[]{"Nom", "Pr\u00e9nom", "Nationalit\u00e9"},
+                new JTextField[]{tfNomA, tfPrenA, tfNatA});
+        dynamicZone.add(pArtisteNew, "artiNew");
+
+        // Carte : groupe existant
+        List<Groupe> groupes = Catalogue.getTousLesGroupes();
+        JComboBox<String> cbGroupe = new JComboBox<>();
+        cbGroupe.setFont(Styles.FONT_SMALL);
+        cbGroupe.setMaximumSize(new Dimension(380, 32));
+        if (groupes.isEmpty()) {
+            cbGroupe.addItem("(aucun groupe dans le catalogue)");
+        } else {
+            for (Groupe g : groupes) cbGroupe.addItem("[" + g.getId() + "] " + g.getNom());
+        }
+        JPanel pGroupeEx = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pGroupeEx.setBackground(Styles.BG_ALT);
+        pGroupeEx.add(cbGroupe);
+        dynamicZone.add(pGroupeEx, "groupeEx");
+
+        // Carte : nouveau groupe
+        JTextField tfNomG  = styledSmallField("Nom du groupe");
+        JTextField tfDateG = styledSmallField("Ann\u00e9e de cr\u00e9ation");
+        JTextField tfNatG  = styledSmallField("Nationalit\u00e9");
+        JPanel pGroupeNew = buildInlineFields(
+                new String[]{"Nom", "Ann\u00e9e", "Nationalit\u00e9"},
+                new JTextField[]{tfNomG, tfDateG, tfNatG});
+        dynamicZone.add(pGroupeNew, "groupeNew");
+
+        cl.show(dynamicZone, "artiEx");
+        panel.add(dynamicZone);
+
+        // Listeners radio → switch de carte
+        rbArtisteEx .addActionListener(e -> cl.show(dynamicZone, "artiEx"));
+        rbArtisteNew.addActionListener(e -> cl.show(dynamicZone, "artiNew"));
+        rbGroupeEx  .addActionListener(e -> cl.show(dynamicZone, "groupeEx"));
+        rbGroupeNew .addActionListener(e -> cl.show(dynamicZone, "groupeNew"));
+
+        // Tag client : stocker toutes les références nécessaires pour la collecte
+        panel.putClientProperty("rbArtisteEx",  rbArtisteEx);
+        panel.putClientProperty("rbArtisteNew", rbArtisteNew);
+        panel.putClientProperty("rbGroupeEx",   rbGroupeEx);
+        panel.putClientProperty("rbGroupeNew",  rbGroupeNew);
+        panel.putClientProperty("cbArtiste",    cbArtiste);
+        panel.putClientProperty("cbGroupe",     cbGroupe);
+        panel.putClientProperty("artistes",     artistes);
+        panel.putClientProperty("groupes",      groupes);
+        panel.putClientProperty("tfNomA",       tfNomA);
+        panel.putClientProperty("tfPrenA",      tfPrenA);
+        panel.putClientProperty("tfNatA",       tfNatA);
+        panel.putClientProperty("tfNomG",       tfNomG);
+        panel.putClientProperty("tfDateG",      tfDateG);
+        panel.putClientProperty("tfNatG",       tfNatG);
+
+        return panel;
+    }
+
+    /** Construit un mini-panel de champs texte alignés en colonne. */
+    private JPanel buildInlineFields(String[] labels, JTextField[] fields) {
+        JPanel p = new JPanel();
+        p.setBackground(Styles.BG_ALT);
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        for (int i = 0; i < labels.length; i++) {
+            JLabel lbl = new JLabel(labels[i]);
+            lbl.setFont(Styles.FONT_SMALL);
+            lbl.setForeground(Styles.TEXT_MUTED);
+            lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+            p.add(lbl);
+            p.add(Box.createVerticalStrut(2));
+            fields[i].setAlignmentX(Component.LEFT_ALIGNMENT);
+            p.add(fields[i]);
+            if (i < labels.length - 1) p.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        }
+        return p;
+    }
+
+    /** JTextField compact pré-stylé pour les sélecteurs inline. */
+    private JTextField styledSmallField(String placeholder) {
+        JTextField tf = new JTextField(18);
+        tf.setFont(Styles.FONT_SMALL);
+        tf.setMaximumSize(new Dimension(320, 30));
+        styleTextField(tf);
+        return tf;
+    }
+
+    /** Applique un style cohérent à un JTextField. */
+    private void styleTextField(JTextField tf) {
+        tf.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(200, 205, 215), 1, true),
+                BorderFactory.createEmptyBorder(6, 10, 6, 10)));
+        tf.setBackground(Color.WHITE);
+        tf.addFocusListener(new java.awt.event.FocusAdapter() {
+            public void focusGained(java.awt.event.FocusEvent e) {
+                tf.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                        BorderFactory.createEmptyBorder(6, 10, 6, 10)));
+            }
+            public void focusLost(java.awt.event.FocusEvent e) {
+                tf.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(new Color(200, 205, 215), 1, true),
+                        BorderFactory.createEmptyBorder(6, 10, 6, 10)));
+            }
+        });
+    }
+
+    /**
+     * Collecte les valeurs du formulaire et retourne la liste ordonnée à pousser
+     * dans formulaireQueue. Retourne null + affiche erreur si validation échoue.
+     *
+     * Ordre pour ajouterMorceau  : titre(S) durée(I) genre(S) année(I) idArtiste(I) idGroupe(I)
+     * Ordre pour ajouterAlbum    : titre(S) année(I) idArtiste(I) idGroupe(I)
+     * Ordre pour ajouterArtiste  : nom(S) prénom(S) nationalité(S)
+     * Ordre pour ajouterGroupe   : nom(S) date(I) nationalité(S)
+     */
+    @SuppressWarnings("unchecked")
+    private List<Object> collectFormValues(List<Object[]> fieldRefs, String key, JLabel errLabel) {
+        List<Object> values = new ArrayList<>();
+        int refIdx = 0;
+
+        for (Object[] ref : fieldRefs) {
+            String type = (String) ref[0];
+            switch (type) {
+                case "text": {
+                    JTextField tf = (JTextField) ref[1];
+                    String val = tf.getText().trim();
+                    if (val.isEmpty()) {
+                        errLabel.setText("Tous les champs sont obligatoires.");
+                        return null;
+                    }
+                    values.add(val);
+                    break;
+                }
+                case "number": {
+                    JTextField tf = (JTextField) ref[1];
+                    String raw = tf.getText().trim();
+                    if (raw.isEmpty()) {
+                        errLabel.setText("Tous les champs num\u00e9riques sont obligatoires.");
+                        return null;
+                    }
+                    try {
+                        values.add(Integer.parseInt(raw));
+                    } catch (NumberFormatException ex) {
+                        errLabel.setText("Valeur num\u00e9rique invalide : \"" + raw + "\"");
+                        return null;
+                    }
+                    break;
+                }
+                case "artiste_ou_groupe": {
+                    JPanel sel = (JPanel) ref[1];
+                    JRadioButton rbArtisteEx  = (JRadioButton) sel.getClientProperty("rbArtisteEx");
+                    JRadioButton rbArtisteNew = (JRadioButton) sel.getClientProperty("rbArtisteNew");
+                    JRadioButton rbGroupeEx   = (JRadioButton) sel.getClientProperty("rbGroupeEx");
+                    JRadioButton rbGroupeNew  = (JRadioButton) sel.getClientProperty("rbGroupeNew");
+                    JComboBox<String> cbArtiste = (JComboBox<String>) sel.getClientProperty("cbArtiste");
+                    JComboBox<String> cbGroupe  = (JComboBox<String>) sel.getClientProperty("cbGroupe");
+                    List<Artiste> artistes = (List<Artiste>) sel.getClientProperty("artistes");
+                    List<Groupe>  groupes  = (List<Groupe>)  sel.getClientProperty("groupes");
+                    JTextField tfNomA  = (JTextField) sel.getClientProperty("tfNomA");
+                    JTextField tfPrenA = (JTextField) sel.getClientProperty("tfPrenA");
+                    JTextField tfNatA  = (JTextField) sel.getClientProperty("tfNatA");
+                    JTextField tfNomG  = (JTextField) sel.getClientProperty("tfNomG");
+                    JTextField tfDateG = (JTextField) sel.getClientProperty("tfDateG");
+                    JTextField tfNatG  = (JTextField) sel.getClientProperty("tfNatG");
+
+                    if (rbArtisteEx.isSelected()) {
+                        // Artiste existant sélectionné dans le combobox
+                        if (artistes.isEmpty()) {
+                            errLabel.setText("Aucun artiste disponible. Cr\u00e9ez-en un d\u2019abord.");
+                            return null;
+                        }
+                        int idx = cbArtiste.getSelectedIndex();
+                        int idArtiste = (idx >= 0 && idx < artistes.size()) ? artistes.get(idx).getId() : 0;
+                        values.add(idArtiste); // idArtiste
+                        values.add(0);         // idGroupe = 0
+                    } else if (rbArtisteNew.isSelected()) {
+                        // Créer un nouvel artiste : pousser d'abord nom/prénom/nat
+                        // Le contrôleur appellera demanderIdArtisteMorceau() → on lui donne -1
+                        // puis demanderIdGroupeMorceau() → 0
+                        // Pour les nouveaux artistes : on utilise le sentinel NEW_ARTISTE
+                        // suivi des 3 valeurs, puis -1 pour groupe
+                        String nomA  = tfNomA.getText().trim();
+                        String prenA = tfPrenA.getText().trim();
+                        String natA  = tfNatA.getText().trim();
+                        if (nomA.isEmpty() || prenA.isEmpty() || natA.isEmpty()) {
+                            errLabel.setText("Remplissez tous les champs du nouvel artiste.");
+                            return null;
+                        }
+                        // On crée l'artiste maintenant (côté EDT) pour récupérer l'ID
+                        Artiste newA = Artiste.ajouter(nomA, prenA, natA);
+                        values.add(newA.getId()); // idArtiste
+                        values.add(0);            // idGroupe = 0
+                    } else if (rbGroupeEx.isSelected()) {
+                        if (groupes.isEmpty()) {
+                            errLabel.setText("Aucun groupe disponible. Cr\u00e9ez-en un d\u2019abord.");
+                            return null;
+                        }
+                        int idx = cbGroupe.getSelectedIndex();
+                        int idGroupe = (idx >= 0 && idx < groupes.size()) ? groupes.get(idx).getId() : 0;
+                        values.add(0);       // idArtiste = 0
+                        values.add(idGroupe);
+                    } else { // rbGroupeNew
+                        String nomG  = tfNomG.getText().trim();
+                        String dateG = tfDateG.getText().trim();
+                        String natG  = tfNatG.getText().trim();
+                        if (nomG.isEmpty() || dateG.isEmpty() || natG.isEmpty()) {
+                            errLabel.setText("Remplissez tous les champs du nouveau groupe.");
+                            return null;
+                        }
+                        try {
+                            int anneeG = Integer.parseInt(dateG);
+                            Groupe newG = Groupe.ajouter(nomG, anneeG, natG);
+                            values.add(0);           // idArtiste = 0
+                            values.add(newG.getId());
+                        } catch (NumberFormatException ex) {
+                            errLabel.setText("Ann\u00e9e de cr\u00e9ation invalide.");
+                            return null;
+                        }
+                    }
+                    break;
+                }
+            }
+            refIdx++;
+        }
+        errLabel.setText(" ");
+        return values;
     }
 
     // ---- Carte : Gérer les comptes ----
@@ -1755,9 +2737,11 @@ public final class VueGraphique extends VueConsole {
         adminComptesContent.setLayout(new BoxLayout(adminComptesContent, BoxLayout.Y_AXIS));
         adminComptesContent.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
-        JPanel wrapper = new JPanel(new BorderLayout());
+        ScrollablePanel wrapper = new ScrollablePanel();
         wrapper.setBackground(Styles.BG_MAIN);
-        wrapper.add(adminComptesContent, BorderLayout.NORTH);
+        wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.Y_AXIS));
+        wrapper.add(adminComptesContent);
+        wrapper.add(Box.createVerticalGlue());
         JScrollPane scroll = new JScrollPane(wrapper);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Styles.BG_MAIN);
@@ -1844,7 +2828,8 @@ public final class VueGraphique extends VueConsole {
                 JPanel header = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
                 header.setBackground(Styles.TEAL_SURFACE);
                 header.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 14));
-                header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+                header.setPreferredSize(new Dimension(0, 36));
+                header.setMinimumSize(new Dimension(0, 36));
                 header.setAlignmentX(Component.LEFT_ALIGNMENT);
                 for (String col : new String[]{"ID", "Nom", "E-mail", "Actions"}) {
                     JLabel h = new JLabel(col);
@@ -1864,7 +2849,8 @@ public final class VueGraphique extends VueConsole {
                     row.setBorder(BorderFactory.createCompoundBorder(
                             BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
                             BorderFactory.createEmptyBorder(8, 14, 8, 14)));
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+                    row.setPreferredSize(new Dimension(0, 48));
+                    row.setMinimumSize(new Dimension(0, 48));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
                     row.addMouseListener(new java.awt.event.MouseAdapter() {
                         @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
@@ -2277,6 +3263,15 @@ public final class VueGraphique extends VueConsole {
         }
     }
 
+    @Override public void afficherConnexionClient() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            showCard("connexionClient");
+        } else {
+            try { SwingUtilities.invokeAndWait(() -> showCard("connexionClient")); }
+            catch (Exception ignored) {}
+        }
+    }
+
     /**
      * Menu principal : réinitialise l'état DECONNECTE, affiche la carte
      * accueil, arme les 5 boutons sidebar correspondants puis bloque
@@ -2366,68 +3361,98 @@ public final class VueGraphique extends VueConsole {
         } catch (InterruptedException e) { return 13; }
     }
 
-    // Saisies via dialog pour les formulaires admin
-    // NB : ces méthodes utilisent les variantes Cancellable : annuler ou fermer
-    // le dialog renvoie "" (String) ou CANCEL_INT (int). Le contrôleur teste
-    // ces valeurs et interrompt le workflow en cours.
-    @Override public String demanderTitreMorceau()     { String s = promptTextCancellable("Nouveau morceau (1/5)", "Titre du morceau :"); return s == null ? "" : s; }
-    @Override public int    demanderDureeMorceau()     { return parseIntPromptCancellable("Nouveau morceau (2/5)", "Dur\u00e9e en secondes :"); }
-    @Override public String demanderGenreMorceau()     { String s = promptTextCancellable("Nouveau morceau (3/5)", "Genre :"); return s == null ? "" : s; }
-    @Override public int    demanderAnneeMorceau()     { return parseIntPromptCancellable("Nouveau morceau (4/5)", "Ann\u00e9e de sortie :"); }
-    @Override public int    demanderIdArtisteMorceau() { return parseIntPromptCancellable("Nouveau morceau (5/5)", "ID de l'artiste (0 si groupe) :"); }
-    @Override public int    demanderIdGroupeMorceau()  { return parseIntPromptCancellable("Nouveau morceau (5/5)", "ID du groupe (0 si artiste solo) :"); }
-    @Override public void   afficherMorceauAjoute(int id) { setAdminCatalogueMsg("Morceau ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
+    // ==================== CONSOMMATEURS DE formulaireQueue ====================
+    //
+    // Les demanderXxx() pour les AJOUTS consomment depuis formulaireQueue,
+    // alimentée par le bouton Valider du formulaire inline.
+    // Les demanderXxx() pour les ASSOCIATIONS (album<->morceau, groupe<->artiste)
+    // restent sur promptTextCancellable car leur flux est géré par la zone de liste.
 
-    @Override public String demanderTitreAlbum()       { String s = promptTextCancellable("Nouvel album (1/4)", "Titre de l'album :"); return s == null ? "" : s; }
-    @Override public int    demanderAnneeAlbum()       { return parseIntPromptCancellable("Nouvel album (2/4)", "Ann\u00e9e de sortie :"); }
-    @Override public int    demanderIdArtisteAlbum()   { return parseIntPromptCancellable("Nouvel album (3/4)", "ID de l'artiste (0 si groupe) :"); }
-    @Override public int    demanderIdGroupeAlbum()    { return parseIntPromptCancellable("Nouvel album (4/4)", "ID du groupe (0 si artiste solo) :"); }
-    @Override public void   afficherAlbumAjoute(int id){ setAdminCatalogueMsg("Album ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
+    /** Consomme un String depuis formulaireQueue. Retourne "" si annulé. */
+    private String fqTakeString() {
+        try {
+            Object o = formulaireQueue.take();
+            if (o == CANCEL_SENTINEL) return "";
+            return o.toString();
+        } catch (InterruptedException e) { Thread.currentThread().interrupt(); return ""; }
+    }
 
-    @Override public String demanderNomArtiste()       { String s = promptTextCancellable("Nouvel artiste (1/3)", "Nom :"); return s == null ? "" : s; }
-    @Override public String demanderPrenomArtiste()    { String s = promptTextCancellable("Nouvel artiste (2/3)", "Pr\u00e9nom :"); return s == null ? "" : s; }
-    @Override public String demanderNationaliteArtiste(){ String s = promptTextCancellable("Nouvel artiste (3/3)", "Nationalit\u00e9 :"); return s == null ? "" : s; }
-    @Override public void   afficherArtisteAjoute(int id){ setAdminCatalogueMsg("Artiste ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
+    /** Consomme un Integer depuis formulaireQueue. Retourne CANCEL_INT si annulé. */
+    private int fqTakeInt() {
+        try {
+            Object o = formulaireQueue.take();
+            if (o == CANCEL_SENTINEL) return CANCEL_INT;
+            if (o instanceof Integer) return (Integer) o;
+            try { return Integer.parseInt(o.toString()); }
+            catch (NumberFormatException e) { return CANCEL_INT; }
+        } catch (InterruptedException e) { Thread.currentThread().interrupt(); return CANCEL_INT; }
+    }
 
-    @Override public String demanderNomGroupe()        { String s = promptTextCancellable("Nouveau groupe (1/3)", "Nom du groupe :"); return s == null ? "" : s; }
-    @Override public int    demanderDateCreationGroupe(){ return parseIntPromptCancellable("Nouveau groupe (2/3)", "Ann\u00e9e de cr\u00e9ation :"); }
-    @Override public String demanderNationaliteGroupe(){ String s = promptTextCancellable("Nouveau groupe (3/3)", "Nationalit\u00e9 :"); return s == null ? "" : s; }
-    @Override public void   afficherGroupeAjoute(int id){ setAdminCatalogueMsg("Groupe ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
+    // Morceau
+    @Override public String demanderTitreMorceau()     { return fqTakeString(); }
+    @Override public int    demanderDureeMorceau()     { return fqTakeInt(); }
+    @Override public String demanderGenreMorceau()     { return fqTakeString(); }
+    @Override public int    demanderAnneeMorceau()     { return fqTakeInt(); }
+    @Override public int    demanderIdArtisteMorceau() { return fqTakeInt(); }
+    @Override public int    demanderIdGroupeMorceau()  { return fqTakeInt(); }
+    @Override public void   afficherMorceauAjoute(int id) { setAdminCatalogueMsg("Morceau ajout\u00e9 avec succ\u00e8s (ID\u00a0: " + id + ")\u00a0\u2714", true); }
 
-    @Override public int    demanderIdAlbumAssociation()  { return parseIntPromptCancellable("Associer morceau \u2192 album (1/3)", "ID de l'album :"); }
-    @Override public int    demanderIdMorceauAssociation(){ return parseIntPromptCancellable("Associer morceau \u2192 album (2/3)", "ID du morceau :"); }
-    @Override public int    demanderNumeroPiste()          { return parseIntPromptCancellable("Associer morceau \u2192 album (3/3)", "Num\u00e9ro de piste :"); }
+    // Album
+    @Override public String demanderTitreAlbum()       { return fqTakeString(); }
+    @Override public int    demanderAnneeAlbum()       { return fqTakeInt(); }
+    @Override public int    demanderIdArtisteAlbum()   { return fqTakeInt(); }
+    @Override public int    demanderIdGroupeAlbum()    { return fqTakeInt(); }
+    @Override public void   afficherAlbumAjoute(int id){ setAdminCatalogueMsg("Album ajout\u00e9 avec succ\u00e8s (ID\u00a0: " + id + ")\u00a0\u2714", true); }
+
+    // Artiste (ajout standalone depuis menu)
+    @Override public String demanderNomArtiste()        { return fqTakeString(); }
+    @Override public String demanderPrenomArtiste()     { return fqTakeString(); }
+    @Override public String demanderNationaliteArtiste(){ return fqTakeString(); }
+    @Override public void   afficherArtisteAjoute(int id){ setAdminCatalogueMsg("Artiste ajout\u00e9 avec succ\u00e8s (ID\u00a0: " + id + ")\u00a0\u2714", true); }
+
+    // Groupe (ajout standalone depuis menu)
+    @Override public String demanderNomGroupe()         { return fqTakeString(); }
+    @Override public int    demanderDateCreationGroupe(){ return fqTakeInt(); }
+    @Override public String demanderNationaliteGroupe() { return fqTakeString(); }
+    @Override public void   afficherGroupeAjoute(int id){ setAdminCatalogueMsg("Groupe ajout\u00e9 avec succ\u00e8s (ID\u00a0: " + id + ")\u00a0\u2714", true); }
+
+    // Associations : restent sur prompt car flux géré par la zone de liste + boutons
+    @Override public int    demanderIdAlbumAssociation()   { return parseIntPromptCancellable("Associer morceau \u2192 album", "ID de l\u2019album\u00a0:"); }
+    @Override public int    demanderIdMorceauAssociation() { return parseIntPromptCancellable("Associer morceau \u2192 album", "ID du morceau\u00a0:"); }
+    @Override public int    demanderNumeroPiste()           { return parseIntPromptCancellable("Num\u00e9ro de piste", "Num\u00e9ro de piste dans l\u2019album\u00a0:"); }
     @Override public void   afficherMorceauAjouteDansAlbum(String tm, String ta){ setAdminCatalogueMsg("\u00ab " + tm + " \u00bb ajout\u00e9 dans \u00ab " + ta + " \u00bb \u2714", true); }
 
-    @Override public int    demanderIdGroupeAssociation() { return parseIntPromptCancellable("Associer artiste \u2192 groupe (1/2)", "ID du groupe :"); }
-    @Override public int    demanderIdArtisteAssociation(){ return parseIntPromptCancellable("Associer artiste \u2192 groupe (2/2)", "ID de l'artiste :"); }
+    @Override public int    demanderIdGroupeAssociation()  { return parseIntPromptCancellable("Associer artiste \u2192 groupe", "ID du groupe\u00a0:"); }
+    @Override public int    demanderIdArtisteAssociation() { return parseIntPromptCancellable("Associer artiste \u2192 groupe", "ID de l\u2019artiste\u00a0:"); }
     @Override public void   afficherMembreAjouteDansGroupe(String na, String ng){ setAdminCatalogueMsg("\u00ab " + na + " \u00bb ajout\u00e9 dans \u00ab " + ng + " \u00bb \u2714", true); }
 
     @Override public int    demanderIdSuppression() {
-        // Bloque jusqu'au clic sur un bouton "Supprimer" dans la liste.
-        // Affiche un hint orange dans le bandeau pour guider l'utilisateur.
+        // Bloque jusqu'au clic sur un bouton "Supprimer" dans la liste,
+        // ou sur le bouton Annuler du bandeau.
         try {
             runOnEdt(() -> {
                 if (adminCatalogueStatus != null) {
                     adminCatalogueStatus.setText(
                             "\u2193  Cliquez sur \u00ab\u00a0\u2212 Supprimer\u00a0\u00bb dans la liste ci-dessous");
                     adminCatalogueStatus.setForeground(new Color(217, 119, 6));
-                    adminCatalogueStatus.setBackground(new Color(255, 251, 235));
-                    adminCatalogueStatus.setBorder(BorderFactory.createCompoundBorder(
-                            BorderFactory.createMatteBorder(0, 4, 0, 0, new Color(217, 119, 6)),
-                            BorderFactory.createEmptyBorder(Styles.PADDING_SM, Styles.PADDING_MD,
-                                    Styles.PADDING_SM, Styles.PADDING_MD)));
                 }
+                if (btnAnnulerSuppression != null) btnAnnulerSuppression.setVisible(true);
             });
             while (true) {
                 Integer direct = suppressionDirecteQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
                 if (direct != null) {
                     suppressionDirecteQueue.clear();
+                    runOnEdt(() -> {
+                        if (btnAnnulerSuppression != null) btnAnnulerSuppression.setVisible(false);
+                    });
                     return direct;
                 }
                 // Si navigation sortante (clic sidebar) → annuler
                 Object ao = adminQueue.peek();
-                if (ao != null) { return CANCEL_INT; }
+                if (ao != null) {
+                    runOnEdt(() -> { if (btnAnnulerSuppression != null) btnAnnulerSuppression.setVisible(false); });
+                    return CANCEL_INT;
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -2996,37 +4021,48 @@ public final class VueGraphique extends VueConsole {
         playlistsQueue.clear(); // vider résidus
         runOnEdt(() -> showCard("playlists"));
         try {
-            Object o = playlistsQueue.take();
-            String s = o.toString();
-            if (s.equals("new"))          return 1;
-            if (s.startsWith("voir:"))    return 5;
-            if (s.startsWith("ajouter:")) return 3;
-            if (s.startsWith("supprimer:")) return 7;
-            if (s.equals("retour"))       return 8;
-            return 8;
+            while (true) {
+                Object o = playlistsQueue.take();
+                String s = o.toString();
+                if (s.equals("new"))            return 1;
+                if (s.startsWith("voir:"))      return 5;
+                if (s.startsWith("ajouter:"))   return 3;
+                if (s.startsWith("retirer:"))   return 4;
+                if (s.startsWith("ecouter:"))   return 5;
+                if (s.startsWith("renommer:"))  return 6;
+                if (s.startsWith("supprimer:")) return 7;
+                if (s.equals("retour"))         return 8;
+                // Reboucle sur les clics de navigation sans valeur utile
+            }
         } catch (InterruptedException e) { return 8; }
     }
 
     @Override public void afficherListePlaylists(List<Playlist> l) { refreshPlaylistsUI(l); }
 
     @Override public void afficherContenuPlaylist(Playlist p) {
-        // Contenu affiché inline dans la carte via refreshPlaylistsUI
+        if (p == null) return;
+        playlistSelectionnee = p;
+        runOnEdt(() -> showPlaylistDetail(p));
     }
 
     @Override public String demanderNomPlaylist() {
-        return promptText("Nouvelle playlist", "Nom de la playlist :");
+        runOnEdt(() -> showPlaylistForm("new", ""));
+        try { return playlistsNomQueue.take(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); return ""; }
     }
 
     @Override public String demanderNouveauNomPlaylist() {
-        return promptText("Renommer la playlist", "Nouveau nom :");
+        runOnEdt(() -> showPlaylistForm("rename", playlistSelectionnee != null ? playlistSelectionnee.getNom() : ""));
+        try { return playlistsNomQueue.take(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); return ""; }
     }
 
     @Override public int demanderIdPlaylist() {
-        // L'id a déjà été transmis via playlistsQueue par le bouton cliqué
+        // L'id est déjà encodé dans la valeur poussée par le bouton cliqué
         try {
             Object o = playlistsQueue.take();
             String s = o.toString();
-            for (String prefix : new String[]{"voir:", "ajouter:", "supprimer:"}) {
+            for (String prefix : new String[]{"voir:", "ajouter:", "retirer:", "ecouter:", "renommer:", "supprimer:"}) {
                 if (s.startsWith(prefix)) {
                     return Integer.parseInt(s.substring(prefix.length()));
                 }
@@ -3036,43 +4072,69 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public int demanderIdMorceau() {
+        // Pour retirer : choisir parmi les morceaux de la playlist sélectionnée
+        if (playlistSelectionnee != null && !playlistSelectionnee.getMorceaux().isEmpty()) {
+            List<model.Morceau> morceaux = playlistSelectionnee.getMorceaux();
+            String[] options = morceaux.stream()
+                    .map(m -> "[" + m.getId() + "] " + m.getTitre())
+                    .toArray(String[]::new);
+            final int[] result = {-1};
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                    Object choix = JOptionPane.showInputDialog(
+                            fenetre, "Choisissez un morceau :", "S\u00e9lection",
+                            JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+                    if (choix != null) {
+                        String s = choix.toString();
+                        result[0] = Integer.parseInt(s.substring(1, s.indexOf(']')));
+                    }
+                });
+            } catch (Exception ignored) {}
+            return result[0];
+        }
         String val = promptText("ID du morceau", "Entrez l'ID du morceau :");
         try { return Integer.parseInt(val.trim()); } catch (NumberFormatException e) { return -1; }
     }
 
-    @Override public void afficherPlaylistCreee(int id, String nom) {
+    /** Recharge et rafraîchit la liste des playlists depuis le modèle. */
+    private void reloadPlaylists() {
+        if (utilisateurId <= 0) return;
+        List<model.Playlist> updated = model.Playlist.getPlaylistsClient(utilisateurId);
+        refreshPlaylistsUI(updated);
+    }
+
+    private void setPlaylistStatus(String msg, boolean ok) {
         runOnEdt(() -> {
-            playlistsStatusLabel.setForeground(new Color(22, 163, 74));
-            playlistsStatusLabel.setText("Playlist \u00ab\u00a0" + nom + "\u00a0\u00bb cr\u00e9\u00e9e avec succ\u00e8s \u2714");
+            playlistsStatusLabel.setForeground(ok ? new Color(22, 163, 74) : new Color(220, 38, 38));
+            playlistsStatusLabel.setText(msg);
         });
+    }
+
+    @Override public void afficherPlaylistCreee(int id, String nom) {
+        setPlaylistStatus("Playlist \u00ab\u00a0" + nom + "\u00a0\u00bb cr\u00e9\u00e9e \u2714", true);
+        reloadPlaylists();
     }
 
     @Override public void afficherPlaylistRenommee(String ancien, String nouveau) {
-        runOnEdt(() -> {
-            playlistsStatusLabel.setForeground(new Color(22, 163, 74));
-            playlistsStatusLabel.setText("\u00ab\u00a0" + ancien + "\u00a0\u00bb renomm\u00e9e en \u00ab\u00a0" + nouveau + "\u00a0\u00bb \u2714");
-        });
+        setPlaylistStatus("\u00ab\u00a0" + ancien + "\u00a0\u00bb renomm\u00e9e en \u00ab\u00a0" + nouveau + "\u00a0\u00bb \u2714", true);
+        reloadPlaylists();
     }
 
     @Override public void afficherMorceauAjoutePlaylist(String titre, String nomPlaylist) {
-        runOnEdt(() -> {
-            playlistsStatusLabel.setForeground(new Color(22, 163, 74));
-            playlistsStatusLabel.setText("\u00ab\u00a0" + titre + "\u00a0\u00bb ajout\u00e9 \u00e0 \u00ab\u00a0" + nomPlaylist + "\u00a0\u00bb \u2714");
-        });
+        setPlaylistStatus("\u00ab\u00a0" + titre + "\u00a0\u00bb ajout\u00e9 \u00e0 \u00ab\u00a0" + nomPlaylist + "\u00a0\u00bb \u2714", true);
+        reloadPlaylists();
     }
 
     @Override public void afficherMorceauRetire() {
-        runOnEdt(() -> {
-            playlistsStatusLabel.setForeground(new Color(22, 163, 74));
-            playlistsStatusLabel.setText("Morceau retir\u00e9 de la playlist \u2714");
-        });
+        setPlaylistStatus("Morceau retir\u00e9 de la playlist \u2714", true);
+        reloadPlaylists();
     }
 
     @Override public void afficherPlaylistSupprimee(String nom) {
-        runOnEdt(() -> {
-            playlistsStatusLabel.setForeground(new Color(220, 38, 38));
-            playlistsStatusLabel.setText("Playlist \u00ab\u00a0" + nom + "\u00a0\u00bb supprim\u00e9e.");
-        });
+        playlistSelectionnee = null;
+        setPlaylistStatus("Playlist \u00ab\u00a0" + nom + "\u00a0\u00bb supprim\u00e9e.", false);
+        reloadPlaylists();
+        runOnEdt(() -> playlistsDetailLayout.show(playlistsDetailPanel, "accueil"));
     }
 
     @Override public void afficherPlaylistIntrouvable() { showError("Playlist introuvable."); }
@@ -3147,7 +4209,14 @@ public final class VueGraphique extends VueConsole {
     @Override public void afficherPasAdmin() {
         runOnEdt(() -> {
             if (labelErreurConnexion[0] != null)
-                labelErreurConnexion[0].setText("Ce compte n'est pas un compte administrateur.");
+                labelErreurConnexion[0].setText("Ce compte n’est pas un compte administrateur.");
+        });
+    }
+
+    @Override public void afficherPasClient() {
+        runOnEdt(() -> {
+            if (labelErreurConnexion[1] != null)
+                labelErreurConnexion[1].setText("Ce compte est un compte administrateur. Utilisez la connexion admin.");
         });
     }
 
@@ -3158,19 +4227,21 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public void afficherMessage(String message) {
-        // Le contrôleur appelle afficherMessage("Merci d'avoir utilise Javazik...")
-        // comme dernier acte avant de se terminer : on ferme la fenêtre.
         if (message != null && message.startsWith("Merci d'avoir utilise")) {
+            runOnEdt(() -> { fenetre.dispose(); System.exit(0); });
+            return;
+        }
+        // Après une annulation : vider les queues pour éviter des résidus
+        if ("Action annulee.".equals(message)) {
+            formulaireQueue.clear();
+            setAdminCatalogueMsg("Action annulée.", false);
             runOnEdt(() -> {
-                fenetre.dispose();
-                System.exit(0);
+                if (adminFormulaireLayout != null)
+                    adminFormulaireLayout.show(adminFormulairePanel, "accueil");
             });
             return;
         }
-        // Tout autre message (erreur, info ponctuelle) : dialog d'info.
-        if (message != null && !message.isEmpty()) {
-            showInfo(message);
-        }
+        if (message != null && !message.isEmpty()) { showInfo(message); }
     }
     @Override public void afficherChoixInvalide() { showError("Choix invalide."); }
 
@@ -3391,7 +4462,8 @@ public final class VueGraphique extends VueConsole {
                 JPanel header = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
                 header.setBackground(Styles.TEAL_SURFACE);
                 header.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 14));
-                header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+                header.setPreferredSize(new Dimension(0, 36));
+                header.setMinimumSize(new Dimension(0, 36));
                 header.setAlignmentX(Component.LEFT_ALIGNMENT);
                 for (String col : new String[]{"Titre", "Interpr\u00e8te", "Ann\u00e9e", "Date / heure"}) {
                     JLabel h = new JLabel(col);
@@ -3480,6 +4552,21 @@ public final class VueGraphique extends VueConsole {
         StringBuilder etoiles = new StringBuilder();
         for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "\u2605" : "\u2606");
         showInfo("Note enregistr\u00e9e : " + etoiles + " (" + note + "/5)");
+    }
+
+
+    /**
+     * JPanel qui implémente Scrollable pour forcer le JScrollPane à l'étirer
+     * sur toute la largeur du viewport — corrige le bug de troncature lors du défilement.
+     */
+    private static class ScrollablePanel extends JPanel implements javax.swing.Scrollable {
+        ScrollablePanel() { super(); }
+        ScrollablePanel(java.awt.LayoutManager lm) { super(lm); }
+        @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+        @Override public int getScrollableUnitIncrement(java.awt.Rectangle r, int o, int d) { return 16; }
+        @Override public int getScrollableBlockIncrement(java.awt.Rectangle r, int o, int d) { return 64; }
+        @Override public boolean getScrollableTracksViewportWidth()  { return true;  }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
 
 }
