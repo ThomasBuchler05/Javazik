@@ -36,6 +36,7 @@ public final class VueGraphique extends VueConsole {
 
     private SessionState sessionState = SessionState.DECONNECTE;
     private String nomUtilisateur = null; // null si non connecté
+    private int utilisateurId = 0;             // ID de l'utilisateur connecté (0 si aucun)
 
     // ==================== COMPOSANTS SWING ====================
 
@@ -289,6 +290,27 @@ public final class VueGraphique extends VueConsole {
     // ==================== ROUTAGE DES CLICS SIDEBAR ====================
 
     /**
+     * Débloque le thread contrôleur quel que soit l'endroit où il attend :
+     * <ul>
+     *   <li>afficherMenuCatalogue() / afficherMenuNavigation() bloqués sur catalogueIntQueue</li>
+     *   <li>demanderRechercheMusique() / demanderIdMorceauEcoute() bloqués sur ecouteQueue</li>
+     *   <li>afficherMenuPlaylist() / demanderIdPlaylist() bloqués sur playlistsQueue</li>
+     * </ul>
+     * Utilisé avant chaque changement de section depuis la sidebar pour garantir
+     * que le contrôleur ressort de sa méthode bloquante courante et peut prendre
+     * en compte le nouveau signal posé dans clientNavQueue.
+     *
+     * IMPORTANT : une seule valeur suffit pour chaque queue. Si le contrôleur
+     * n'est pas en train d'attendre sur l'une d'elles, les afficherMenu*()
+     * correspondants la videront avec queue.clear() avant leur prochaine attente.
+     */
+    private void interrompreAttentesClient() {
+        catalogueIntQueue.offer(7);
+        ecouteQueue.offer("nav:sidebar");
+        playlistsQueue.offer("retour");
+    }
+
+    /**
      * Dispatch central pour tous les clics sidebar.
      * Deux chemins possibles selon qu'une saisie est en cours ou non.
      */
@@ -297,6 +319,49 @@ public final class VueGraphique extends VueConsole {
         if (r != null && r.acceptsSidebarKey(actionKey)) {
             r.submitForKey(actionKey);
             return;
+        }
+
+        // Sidebar CLIENT / VISITEUR
+        if (sessionState == SessionState.CLIENT || sessionState == SessionState.VISITEUR) {
+            switch (actionKey) {
+                case "catalogue":
+                    interrompreAttentesClient();
+                    showCard("catalogue");
+                    clientNavQueue.offer("catalogue");
+                    return;
+                case "playlists":
+                    interrompreAttentesClient();
+                    showCard("playlists");
+                    clientNavQueue.offer("playlists");
+                    return;
+                case "ecoute":
+                    interrompreAttentesClient();
+                    showCard("ecoute");
+                    clientNavQueue.offer("ecoute");
+                    return;
+                case "historique":
+                    interrompreAttentesClient();
+                    showCard("historique");
+                    // Recharger l'historique immédiatement depuis le fichier (I/O hors EDT)
+                    new Thread(() -> {
+                        if (utilisateurId > 0) {
+                            java.util.List<model.Historique> hist =
+                                    model.Historique.getHistoriqueClient(utilisateurId);
+                            afficherHistorique(hist);
+                        }
+                    }).start();
+                    clientNavQueue.offer("historique");
+                    return;
+                case "accueil":
+                    interrompreAttentesClient();
+                    showCard("accueil");
+                    clientNavQueue.offer("accueil");
+                    return;
+                case "deconnexion":
+                    interrompreAttentesClient();
+                    clientNavQueue.offer("deconnexion");
+                    return;
+            }
         }
 
         // Sidebar admin : les clics doivent pousser dans adminQueue pour débloquer afficherMenuAdmin()
@@ -326,6 +391,8 @@ public final class VueGraphique extends VueConsole {
             }
             if (actionKey.equals("gestionCatalogue")) {
                 showCard("gestionCatalogue");
+                resetAdminCatalogueMsg();
+                clearAdminCatalogueContent();
                 catalogueIntQueue.offer(7);
                 try { adminQueue.put("gestionCatalogue"); } catch (InterruptedException ignored) {}
                 return;
@@ -366,6 +433,7 @@ public final class VueGraphique extends VueConsole {
         Runnable rebuild = () -> {
             this.sessionState = newState;
             this.nomUtilisateur = utilisateur;
+            if (newState == SessionState.DECONNECTE) this.utilisateurId = 0;
             cardCourante = "accueil";
             rebuildSidebar();
             contentLayout.show(contentPanel, "accueil");
@@ -1070,8 +1138,8 @@ public final class VueGraphique extends VueConsole {
 
     private JPanel          playlistsContentArea;
     private JLabel          playlistsStatusLabel;
-    private final java.util.concurrent.SynchronousQueue<Object> playlistsQueue =
-            new java.util.concurrent.SynchronousQueue<>();
+    private final java.util.concurrent.LinkedBlockingQueue<Object> playlistsQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
     // Stocke la liste courante de playlists pour les clics
     private List<model.Playlist> playlistsCourantes = new java.util.ArrayList<>();
 
@@ -1222,8 +1290,8 @@ public final class VueGraphique extends VueConsole {
     private JLabel          ecouteInterpreteLabel;
     private JLabel          ecouteLimiteLabel;
     private JPanel          ecoutePlayerPanel;
-    private final java.util.concurrent.SynchronousQueue<Object> ecouteQueue =
-            new java.util.concurrent.SynchronousQueue<>();
+    private final java.util.concurrent.LinkedBlockingQueue<Object> ecouteQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
 
     private JPanel buildEcouteCard() {
         JPanel card = new JPanel(new BorderLayout());
@@ -1382,8 +1450,18 @@ public final class VueGraphique extends VueConsole {
     private final java.util.concurrent.LinkedBlockingQueue<Object> adminQueue =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
+    /**
+     * Queue de navigation pour CLIENT et VISITEUR.
+     * Utilisée pour débloquer afficherMenuCatalogue(), afficherMenuPlaylist(),
+     * demanderRechercheMusique() quand l'utilisateur clique dans la sidebar.
+     * Valeurs : "catalogue", "playlists", "ecoute", "historique", "deconnexion", "accueil"
+     */
+    private final java.util.concurrent.LinkedBlockingQueue<String> clientNavQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
+
     // Références aux composants mis à jour dynamiquement
     private JPanel adminCatalogueContent;
+    private JLabel adminCatalogueStatus;   // bandeau de feedback en haut de la carte admin
     private JPanel adminComptesContent;
     private JLabel adminComptesStatus;
     private JPanel adminStatsCard;   // le JPanel complet de la carte statistiques
@@ -1393,53 +1471,86 @@ public final class VueGraphique extends VueConsole {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(Styles.BG_MAIN);
 
+        // ========== HEADER : titre + bandeau de feedback ==========
         JPanel top = new JPanel();
         top.setBackground(Styles.BG_MAIN);
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
-        top.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_MD, Styles.PADDING_LG * 2));
+        top.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2,
+                Styles.PADDING_MD, Styles.PADDING_LG * 2));
 
         JLabel titre = Styles.titleLabel("G\u00e9rer le catalogue");
         titre.setAlignmentX(Component.LEFT_ALIGNMENT);
         top.add(titre);
+        top.add(Box.createVerticalStrut(Styles.PADDING_SM));
+
+        JLabel sub = Styles.mutedLabel(
+                "Ajoutez ou supprimez des \u00e9l\u00e9ments du catalogue. " +
+                        "Les listes s\u2019affichent ci-dessous pour r\u00e9cup\u00e9rer un ID.");
+        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+        top.add(sub);
         top.add(Box.createVerticalStrut(Styles.PADDING_MD));
 
-        // Boutons d'action organisés en grille 2 colonnes
-        JPanel grid = new JPanel(new GridLayout(0, 2, Styles.PADDING_MD, Styles.PADDING_SM));
-        grid.setBackground(Styles.BG_MAIN);
-        grid.setAlignmentX(Component.LEFT_ALIGNMENT);
+        // Bandeau de feedback permanent (message d'état de la dernière action)
+        adminCatalogueStatus = new JLabel(" ");
+        adminCatalogueStatus.setFont(Styles.FONT_SMALL_BOLD);
+        adminCatalogueStatus.setForeground(Styles.TEXT_MUTED);
+        adminCatalogueStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
+        adminCatalogueStatus.setBorder(new EmptyBorder(
+                Styles.PADDING_SM, Styles.PADDING_MD, Styles.PADDING_SM, Styles.PADDING_MD));
+        adminCatalogueStatus.setOpaque(true);
+        adminCatalogueStatus.setBackground(Styles.BG_ALT);
+        adminCatalogueStatus.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+        top.add(adminCatalogueStatus);
+        top.add(Box.createVerticalStrut(Styles.PADDING_MD));
 
-        String[][] actions = {
-                {"+ Ajouter morceau",          "ajouterMorceau"},
-                {"\u2212 Supprimer morceau",   "supprimerMorceau"},
-                {"+ Ajouter album",            "ajouterAlbum"},
-                {"\u2212 Supprimer album",     "supprimerAlbum"},
-                {"+ Morceau \u2192 Album",     "ajouterMorceauAlbum"},
-                {"+ Ajouter artiste",          "ajouterArtiste"},
-                {"\u2212 Supprimer artiste",   "supprimerArtiste"},
-                {"+ Ajouter groupe",           "ajouterGroupe"},
-                {"\u2212 Supprimer groupe",    "supprimerGroupe"},
-                {"+ Membre \u2192 Groupe",     "ajouterMembreGroupe"},
-        };
-        for (String[] a : actions) {
-            boolean isDanger = a[0].startsWith("\u2212");
-            JButton b = isDanger ? Styles.dangerButton(a[0]) : Styles.primaryButton(a[0]);
-            b.setFont(Styles.FONT_SMALL);
-            final String key = a[1];
-            b.addActionListener(e -> { try { adminQueue.put(key); } catch (InterruptedException ignored) {} });
-            grid.add(b);
-        }
-        top.add(grid);
+        // ========== ACTIONS PAR SECTION ==========
+        JPanel sectionsPanel = new JPanel();
+        sectionsPanel.setBackground(Styles.BG_MAIN);
+        sectionsPanel.setLayout(new BoxLayout(sectionsPanel, BoxLayout.Y_AXIS));
+        sectionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        sectionsPanel.add(buildAdminSection("Morceaux", new String[][]{
+                {"+ Ajouter un morceau",   "ajouterMorceau"},
+                {"\u2212 Supprimer un morceau", "supprimerMorceau"},
+        }));
+        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        sectionsPanel.add(buildAdminSection("Albums", new String[][]{
+                {"+ Ajouter un album",     "ajouterAlbum"},
+                {"\u2212 Supprimer un album",   "supprimerAlbum"},
+        }));
+        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        sectionsPanel.add(buildAdminSection("Artistes", new String[][]{
+                {"+ Ajouter un artiste",   "ajouterArtiste"},
+                {"\u2212 Supprimer un artiste", "supprimerArtiste"},
+        }));
+        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        sectionsPanel.add(buildAdminSection("Groupes", new String[][]{
+                {"+ Ajouter un groupe",    "ajouterGroupe"},
+                {"\u2212 Supprimer un groupe",  "supprimerGroupe"},
+        }));
+        sectionsPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        sectionsPanel.add(buildAdminSection("Associations", new String[][]{
+                {"Ajouter un morceau dans un album",   "ajouterMorceauAlbum"},
+                {"Ajouter un membre dans un groupe",   "ajouterMembreGroupe"},
+        }));
+
+        top.add(sectionsPanel);
         card.add(top, BorderLayout.NORTH);
 
-        // Zone de feedback scrollable
+        // ========== ZONE DE LISTE CONTEXTUELLE (scrollable) ==========
+        // C'est dans cette zone que s'affichent les listes de morceaux/albums/...
+        // quand le contrôleur appelle vue.afficherListeMorceaux(...) pendant
+        // un flux admin (ex : suppression, ajout dans album).
         adminCatalogueContent = new JPanel();
         adminCatalogueContent.setBackground(Styles.BG_MAIN);
         adminCatalogueContent.setLayout(new BoxLayout(adminCatalogueContent, BoxLayout.Y_AXIS));
-        adminCatalogueContent.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
+        adminCatalogueContent.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2,
+                Styles.PADDING_LG, Styles.PADDING_LG * 2));
 
         JPanel wrapper = new JPanel(new BorderLayout());
         wrapper.setBackground(Styles.BG_MAIN);
         wrapper.add(adminCatalogueContent, BorderLayout.NORTH);
+
         JScrollPane scroll = new JScrollPane(wrapper);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Styles.BG_MAIN);
@@ -1448,6 +1559,40 @@ public final class VueGraphique extends VueConsole {
         card.add(scroll, BorderLayout.CENTER);
 
         return card;
+    }
+
+    /**
+     * Construit une section de boutons admin avec un sous-titre.
+     * Les boutons commençant par "\u2212" (moins) sont stylés en danger.
+     */
+    private JPanel buildAdminSection(String titre, String[][] actions) {
+        JPanel section = new JPanel();
+        section.setBackground(Styles.BG_MAIN);
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel lbl = new JLabel(titre);
+        lbl.setFont(Styles.FONT_SMALL_BOLD);
+        lbl.setForeground(Styles.TEXT_MUTED);
+        lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lbl.setBorder(new EmptyBorder(0, 2, Styles.PADDING_SM, 0));
+        section.add(lbl);
+
+        JPanel grid = new JPanel(new GridLayout(1, actions.length, Styles.PADDING_MD, 0));
+        grid.setBackground(Styles.BG_MAIN);
+        grid.setAlignmentX(Component.LEFT_ALIGNMENT);
+        grid.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+
+        for (String[] a : actions) {
+            boolean isDanger = a[0].startsWith("\u2212");
+            JButton b = isDanger ? Styles.dangerButton(a[0]) : Styles.primaryButton(a[0]);
+            b.setFont(Styles.FONT_SMALL);
+            final String key = a[1];
+            b.addActionListener(e -> { try { adminQueue.put(key); } catch (InterruptedException ignored) {} });
+            grid.add(b);
+        }
+        section.add(grid);
+        return section;
     }
 
     // ---- Carte : Gérer les comptes ----
@@ -1513,16 +1658,40 @@ public final class VueGraphique extends VueConsole {
         return adminStatsCard;
     }
 
-    /** Met à jour la zone feedback du catalogue admin. */
+    /**
+     * Met à jour le bandeau de feedback en haut de la carte admin.
+     * Contrairement à l'ancienne version, cette méthode NE touche PAS à la
+     * zone de liste (adminCatalogueContent) — le message et la liste cohabitent.
+     */
     private void setAdminCatalogueMsg(String msg, boolean success) {
         runOnEdt(() -> {
+            if (adminCatalogueStatus == null) return;
+            adminCatalogueStatus.setText(msg);
+            if (success) {
+                adminCatalogueStatus.setForeground(new Color(22, 163, 74));
+                adminCatalogueStatus.setBackground(new Color(240, 253, 244));
+            } else {
+                adminCatalogueStatus.setForeground(Styles.DANGER);
+                adminCatalogueStatus.setBackground(new Color(254, 242, 242));
+            }
+        });
+    }
+
+    /** Réinitialise le bandeau de feedback admin (état neutre). */
+    private void resetAdminCatalogueMsg() {
+        runOnEdt(() -> {
+            if (adminCatalogueStatus == null) return;
+            adminCatalogueStatus.setText(" ");
+            adminCatalogueStatus.setForeground(Styles.TEXT_MUTED);
+            adminCatalogueStatus.setBackground(Styles.BG_ALT);
+        });
+    }
+
+    /** Vide la zone de liste contextuelle admin. */
+    private void clearAdminCatalogueContent() {
+        runOnEdt(() -> {
+            if (adminCatalogueContent == null) return;
             adminCatalogueContent.removeAll();
-            JLabel l = new JLabel(msg);
-            l.setFont(Styles.FONT_BODY);
-            l.setForeground(success ? new Color(22, 163, 74) : new Color(220, 38, 38));
-            l.setAlignmentX(Component.LEFT_ALIGNMENT);
-            l.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, 0, 0));
-            adminCatalogueContent.add(l);
             adminCatalogueContent.revalidate();
             adminCatalogueContent.repaint();
         });
@@ -1611,6 +1780,32 @@ public final class VueGraphique extends VueConsole {
     }
 
     /**
+     * Exécute un Runnable sur l'EDT et attend sa complétion avant de rendre la main.
+     * À utiliser depuis le thread contrôleur quand on DOIT garantir que l'UI
+     * est effectivement mise à jour avant de se mettre à attendre sur une queue
+     * (élimine les races entre planification d'affichage et arrivée d'événements).
+     *
+     * Sécurité anti-deadlock : si on est déjà sur l'EDT, on exécute directement
+     * (invokeAndWait depuis l'EDT déclencherait une erreur). Ce cas ne devrait
+     * jamais arriver en pratique car le thread contrôleur n'est jamais l'EDT.
+     */
+    private void runOnEdtAndWait(Runnable r) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            r.run();
+            return;
+        }
+        try {
+            SwingUtilities.invokeAndWait(r);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        } catch (java.lang.reflect.InvocationTargetException ite) {
+            // Propager uniquement en log : ne pas crasher le thread contrôleur
+            Throwable cause = ite.getCause();
+            System.err.println("[runOnEdtAndWait] erreur sur l'EDT : " + cause);
+        }
+    }
+
+    /**
      * Ancien système de désactivation des boutons non armés par une requête
      * en cours — retiré car causait races et mauvaise UX. Les boutons non
      * armés restent cliquables et font juste de la navigation pure (changement
@@ -1647,6 +1842,54 @@ public final class VueGraphique extends VueConsole {
             }
         } catch (Exception ignored) {}
         return resultat[0];
+    }
+
+    /**
+     * Variante de promptText qui distingue annulation et saisie vide.
+     * Retourne {@code null} si l'utilisateur a cliqué Annuler ou fermé le dialog,
+     * sinon la chaîne saisie (éventuellement vide).
+     *
+     * Utilisée par les saisies admin pour pouvoir interrompre proprement un
+     * workflow multi-étapes quand l'utilisateur annule.
+     */
+    private String promptTextCancellable(String titre, String message) {
+        final String[] resultat = {null};
+        try {
+            Runnable r = () -> {
+                Object rep = JOptionPane.showInputDialog(
+                        fenetre, message, titre,
+                        JOptionPane.PLAIN_MESSAGE);
+                resultat[0] = (rep == null) ? null : rep.toString();
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                r.run();
+            } else {
+                SwingUtilities.invokeAndWait(r);
+            }
+        } catch (Exception ignored) {}
+        return resultat[0];
+    }
+
+    /**
+     * Sentinelle retournée par les prompts entiers admin quand l'utilisateur annule
+     * ou saisit une valeur non numérique. Le contrôleur doit tester cette valeur
+     * et interrompre le workflow en cours si elle est rencontrée.
+     */
+    public static final int CANCEL_INT = Integer.MIN_VALUE;
+
+    /**
+     * Variante de parseIntPrompt qui signale l'annulation par {@link #CANCEL_INT}
+     * au lieu de retourner une valeur par défaut silencieuse.
+     * - Annulation du dialog → CANCEL_INT
+     * - Saisie non numérique → CANCEL_INT
+     * - Saisie vide         → CANCEL_INT
+     * - Saisie numérique    → la valeur parsée
+     */
+    private int parseIntPromptCancellable(String titre, String msg) {
+        String s = promptTextCancellable(titre, msg);
+        if (s == null || s.trim().isEmpty()) return CANCEL_INT;
+        try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { return CANCEL_INT; }
     }
 
     /**
@@ -1914,7 +2157,19 @@ public final class VueGraphique extends VueConsole {
                     case "retour":              return 13;
                     case "catalogue":           return 14;
                     case "gestionCatalogue":
-                        runOnEdt(() -> showCard("gestionCatalogue"));
+                        runOnEdt(() -> {
+                            showCard("gestionCatalogue");
+                            if (adminCatalogueStatus != null) {
+                                adminCatalogueStatus.setText(" ");
+                                adminCatalogueStatus.setForeground(Styles.TEXT_MUTED);
+                                adminCatalogueStatus.setBackground(Styles.BG_ALT);
+                            }
+                            if (adminCatalogueContent != null) {
+                                adminCatalogueContent.removeAll();
+                                adminCatalogueContent.revalidate();
+                                adminCatalogueContent.repaint();
+                            }
+                        });
                         // reboucler pour attendre la prochaine action
                         break;
                     default:
@@ -1927,40 +2182,43 @@ public final class VueGraphique extends VueConsole {
     }
 
     // Saisies via dialog pour les formulaires admin
-    @Override public String demanderTitreMorceau()     { return promptText("Nouveau morceau (1/5)", "Titre du morceau :"); }
-    @Override public int    demanderDureeMorceau()     { return parseIntPrompt("Nouveau morceau (2/5)", "Dur\u00e9e en secondes :", 0); }
-    @Override public String demanderGenreMorceau()     { return promptText("Nouveau morceau (3/5)", "Genre :"); }
-    @Override public int    demanderAnneeMorceau()     { return parseIntPrompt("Nouveau morceau (4/5)", "Ann\u00e9e de sortie :", 2000); }
-    @Override public int    demanderIdArtisteMorceau() { return parseIntPrompt("Nouveau morceau (5/5)", "ID de l'artiste (0 si groupe) :", 0); }
-    @Override public int    demanderIdGroupeMorceau()  { return parseIntPrompt("Nouveau morceau (5/5)", "ID du groupe (0 si artiste solo) :", 0); }
+    // NB : ces méthodes utilisent les variantes Cancellable : annuler ou fermer
+    // le dialog renvoie "" (String) ou CANCEL_INT (int). Le contrôleur teste
+    // ces valeurs et interrompt le workflow en cours.
+    @Override public String demanderTitreMorceau()     { String s = promptTextCancellable("Nouveau morceau (1/5)", "Titre du morceau :"); return s == null ? "" : s; }
+    @Override public int    demanderDureeMorceau()     { return parseIntPromptCancellable("Nouveau morceau (2/5)", "Dur\u00e9e en secondes :"); }
+    @Override public String demanderGenreMorceau()     { String s = promptTextCancellable("Nouveau morceau (3/5)", "Genre :"); return s == null ? "" : s; }
+    @Override public int    demanderAnneeMorceau()     { return parseIntPromptCancellable("Nouveau morceau (4/5)", "Ann\u00e9e de sortie :"); }
+    @Override public int    demanderIdArtisteMorceau() { return parseIntPromptCancellable("Nouveau morceau (5/5)", "ID de l'artiste (0 si groupe) :"); }
+    @Override public int    demanderIdGroupeMorceau()  { return parseIntPromptCancellable("Nouveau morceau (5/5)", "ID du groupe (0 si artiste solo) :"); }
     @Override public void   afficherMorceauAjoute(int id) { setAdminCatalogueMsg("Morceau ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
 
-    @Override public String demanderTitreAlbum()       { return promptText("Nouvel album (1/4)", "Titre de l'album :"); }
-    @Override public int    demanderAnneeAlbum()       { return parseIntPrompt("Nouvel album (2/4)", "Ann\u00e9e de sortie :", 2000); }
-    @Override public int    demanderIdArtisteAlbum()   { return parseIntPrompt("Nouvel album (3/4)", "ID de l'artiste (0 si groupe) :", 0); }
-    @Override public int    demanderIdGroupeAlbum()    { return parseIntPrompt("Nouvel album (4/4)", "ID du groupe (0 si artiste solo) :", 0); }
+    @Override public String demanderTitreAlbum()       { String s = promptTextCancellable("Nouvel album (1/4)", "Titre de l'album :"); return s == null ? "" : s; }
+    @Override public int    demanderAnneeAlbum()       { return parseIntPromptCancellable("Nouvel album (2/4)", "Ann\u00e9e de sortie :"); }
+    @Override public int    demanderIdArtisteAlbum()   { return parseIntPromptCancellable("Nouvel album (3/4)", "ID de l'artiste (0 si groupe) :"); }
+    @Override public int    demanderIdGroupeAlbum()    { return parseIntPromptCancellable("Nouvel album (4/4)", "ID du groupe (0 si artiste solo) :"); }
     @Override public void   afficherAlbumAjoute(int id){ setAdminCatalogueMsg("Album ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
 
-    @Override public String demanderNomArtiste()       { return promptText("Nouvel artiste (1/3)", "Nom :"); }
-    @Override public String demanderPrenomArtiste()    { return promptText("Nouvel artiste (2/3)", "Pr\u00e9nom :"); }
-    @Override public String demanderNationaliteArtiste(){ return promptText("Nouvel artiste (3/3)", "Nationalit\u00e9 :"); }
+    @Override public String demanderNomArtiste()       { String s = promptTextCancellable("Nouvel artiste (1/3)", "Nom :"); return s == null ? "" : s; }
+    @Override public String demanderPrenomArtiste()    { String s = promptTextCancellable("Nouvel artiste (2/3)", "Pr\u00e9nom :"); return s == null ? "" : s; }
+    @Override public String demanderNationaliteArtiste(){ String s = promptTextCancellable("Nouvel artiste (3/3)", "Nationalit\u00e9 :"); return s == null ? "" : s; }
     @Override public void   afficherArtisteAjoute(int id){ setAdminCatalogueMsg("Artiste ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
 
-    @Override public String demanderNomGroupe()        { return promptText("Nouveau groupe (1/3)", "Nom du groupe :"); }
-    @Override public int    demanderDateCreationGroupe(){ return parseIntPrompt("Nouveau groupe (2/3)", "Ann\u00e9e de cr\u00e9ation :", 2000); }
-    @Override public String demanderNationaliteGroupe(){ return promptText("Nouveau groupe (3/3)", "Nationalit\u00e9 :"); }
+    @Override public String demanderNomGroupe()        { String s = promptTextCancellable("Nouveau groupe (1/3)", "Nom du groupe :"); return s == null ? "" : s; }
+    @Override public int    demanderDateCreationGroupe(){ return parseIntPromptCancellable("Nouveau groupe (2/3)", "Ann\u00e9e de cr\u00e9ation :"); }
+    @Override public String demanderNationaliteGroupe(){ String s = promptTextCancellable("Nouveau groupe (3/3)", "Nationalit\u00e9 :"); return s == null ? "" : s; }
     @Override public void   afficherGroupeAjoute(int id){ setAdminCatalogueMsg("Groupe ajout\u00e9 avec succ\u00e8s (ID : " + id + ") \u2714", true); }
 
-    @Override public int    demanderIdAlbumAssociation()  { return parseIntPrompt("Associer morceau \u2192 album (1/3)", "ID de l'album :", -1); }
-    @Override public int    demanderIdMorceauAssociation(){ return parseIntPrompt("Associer morceau \u2192 album (2/3)", "ID du morceau :", -1); }
-    @Override public int    demanderNumeroPiste()          { return parseIntPrompt("Associer morceau \u2192 album (3/3)", "Num\u00e9ro de piste :", 1); }
+    @Override public int    demanderIdAlbumAssociation()  { return parseIntPromptCancellable("Associer morceau \u2192 album (1/3)", "ID de l'album :"); }
+    @Override public int    demanderIdMorceauAssociation(){ return parseIntPromptCancellable("Associer morceau \u2192 album (2/3)", "ID du morceau :"); }
+    @Override public int    demanderNumeroPiste()          { return parseIntPromptCancellable("Associer morceau \u2192 album (3/3)", "Num\u00e9ro de piste :"); }
     @Override public void   afficherMorceauAjouteDansAlbum(String tm, String ta){ setAdminCatalogueMsg("\u00ab " + tm + " \u00bb ajout\u00e9 dans \u00ab " + ta + " \u00bb \u2714", true); }
 
-    @Override public int    demanderIdGroupeAssociation() { return parseIntPrompt("Associer artiste \u2192 groupe (1/2)", "ID du groupe :", -1); }
-    @Override public int    demanderIdArtisteAssociation(){ return parseIntPrompt("Associer artiste \u2192 groupe (2/2)", "ID de l'artiste :", -1); }
+    @Override public int    demanderIdGroupeAssociation() { return parseIntPromptCancellable("Associer artiste \u2192 groupe (1/2)", "ID du groupe :"); }
+    @Override public int    demanderIdArtisteAssociation(){ return parseIntPromptCancellable("Associer artiste \u2192 groupe (2/2)", "ID de l'artiste :"); }
     @Override public void   afficherMembreAjouteDansGroupe(String na, String ng){ setAdminCatalogueMsg("\u00ab " + na + " \u00bb ajout\u00e9 dans \u00ab " + ng + " \u00bb \u2714", true); }
 
-    @Override public int    demanderIdSuppression() { return parseIntPrompt("Suppression", "ID de l'\u00e9l\u00e9ment \u00e0 supprimer :", -1); }
+    @Override public int    demanderIdSuppression() { return parseIntPromptCancellable("Suppression", "ID de l'\u00e9l\u00e9ment \u00e0 supprimer :"); }
     @Override public void   afficherElementSupprime(String type)          { setAdminCatalogueMsg(type + " supprim\u00e9(e) avec succ\u00e8s \u2714", true); }
     @Override public void   afficherElementNonTrouve(String type, int id) { setAdminCatalogueMsg(type + " introuvable (ID : " + id + ")", false); }
 
@@ -2082,60 +2340,109 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public int afficherMenuClient() {
-        return awaitSidebarChoice(new java.util.HashMap<String,Integer>(){{
-            put("catalogue",1); put("playlists",2); put("ecoute",3); put("historique",4);
-            put("deconnexion",5);
-        }}, 5);
+        try {
+            while (true) {
+                String nav = clientNavQueue.take();
+                switch (nav) {
+                    case "catalogue":   return 1;
+                    case "playlists":   return 2;
+                    case "ecoute":      return 3;
+                    case "historique":  return 4;
+                    case "deconnexion": return 5;
+                    default: break;
+                }
+            }
+        } catch (InterruptedException e) { return 5; }
     }
 
     @Override public int afficherMenuVisiteur() {
-        return awaitSidebarChoice(new java.util.HashMap<String,Integer>(){{
-            put("catalogue",1); put("ecoute",2); put("deconnexion",3);
-        }}, 3);
+        try {
+            while (true) {
+                String nav = clientNavQueue.take();
+                switch (nav) {
+                    case "catalogue":   return 1;
+                    case "ecoute":      return 2;
+                    case "deconnexion": return 3;
+                    default: break;
+                }
+            }
+        } catch (InterruptedException e) { return 3; }
     }
 
     @Override public int afficherMenuCatalogue() {
-        try {
-            if (!SwingUtilities.isEventDispatchThread()) {
-                SwingUtilities.invokeAndWait(() -> showCard("catalogue"));
-            }
-        } catch (Exception ignored) {}
+        // 1. Détermination du filtre "immédiat" à retourner sans attendre :
+        //    priorité au filtre posé par naviguer() (via catalogueFiltreEnAttente),
+        //    sinon on regarde si un filtre traîne déjà dans la queue (clic filtre
+        //    arrivé pendant une transition depuis une autre carte).
+        Integer filtreImmediat = catalogueFiltreEnAttente;
+        catalogueFiltreEnAttente = null;
 
-        // Si un filtre a été intercepté pendant naviguer(), on le consomme directement
-        Integer enAttente = catalogueFiltreEnAttente;
-        if (enAttente != null) {
-            catalogueFiltreEnAttente = null;
-            catalogueIntQueue.clear(); // vider les éventuels doublons
-            if (enAttente == 100) {
-                SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
-                return 1;
+        if (filtreImmediat == null) {
+            // Drain complet : ignorer les 7 résiduels, garder le dernier filtre en date
+            Integer v;
+            while ((v = catalogueIntQueue.poll()) != null) {
+                if (v == 7) continue;                // signal de sortie : on ignore
+                filtreImmediat = v;                  // dernier filtre gagne
             }
-            return enAttente;
         }
-
-        // Vider les valeurs parasites restantes dans la queue avant d'attendre
+        // Queue propre avant de partir (au cas où on aurait laissé des résidus)
         catalogueIntQueue.clear();
 
+        // 2. Affichage de l'état initial SYNCHRONE (on attend que l'EDT l'ait rendu).
+        //    Cela élimine la race entre planification d'affichage (invokeLater) et
+        //    arrivée d'un clic filtre : quand on entre dans la boucle d'attente
+        //    ci-dessous, l'UI est déjà peinte et les boutons sont opérationnels.
+        final Integer fv = filtreImmediat;
+        final boolean isClientOrVisitor =
+                (sessionState == SessionState.CLIENT || sessionState == SessionState.VISITEUR);
+
+        runOnEdtAndWait(() -> {
+            showCard("catalogue");
+            // Par défaut (aucun filtre en attente) : afficher la liste des morceaux.
+            // Pour ADMIN : ne rien imposer (on laisse l'écran admin gérer son contenu).
+            if (fv == null && isClientOrVisitor) {
+                afficherListeMorceauxDirect(model.Catalogue.getTousLesMorceaux());
+            }
+        });
+
+        // 3. Si un filtre était déjà en attente, le retourner immédiatement
+        //    (le contrôleur va alors afficher la liste correspondante).
+        if (filtreImmediat != null) {
+            if (filtreImmediat == 100) {
+                runOnEdt(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
+                return 1;
+            }
+            return filtreImmediat;
+        }
+
+        // 4. Boucle d'attente normale : on attend un clic filtre, un clic détail,
+        //    ou un signal de sortie (navigation sidebar).
         try {
             while (true) {
-                // Poll avec timeout : permet de détecter un clic sidebar admin même sans filtre
                 Integer v = catalogueIntQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 if (v != null) {
-                    if (v == 7) { return 7; } // signal de sortie admin
+                    if (v == 7) { return 7; }
                     if (v == 100) {
-                        SwingUtilities.invokeLater(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
+                        runOnEdt(() -> { if (catalogueSearchField != null) catalogueSearchField.setText(""); });
                         return 1;
                     }
                     return v;
                 }
 
-                // Pas de filtre : vérifier si la sidebar admin a envoyé un ordre (ex: déconnexion)
                 if (sessionState == SessionState.ADMIN) {
                     Object ao = adminQueue.poll();
                     if (ao != null) {
-                        adminQueue.put(ao); // remettre pour afficherMenuAdmin()
-                        return 7; // sortir de menuCatalogue()
+                        adminQueue.put(ao);
+                        return 7;
+                    }
+                }
+
+                if (sessionState == SessionState.CLIENT || sessionState == SessionState.VISITEUR) {
+                    String nav = clientNavQueue.poll();
+                    if (nav != null) {
+                        clientNavQueue.offer(nav);
+                        return 7;
                     }
                 }
             }
@@ -2169,7 +2476,9 @@ public final class VueGraphique extends VueConsole {
                         return dernierTypeNav;
                     }
                     if (v == 7) {
-                        // Signal de sortie injecté par la sidebar admin
+                        // Signal de sortie injecté par la sidebar — vider les éventuels
+                        // résidus pour ne pas polluer le prochain afficherMenuCatalogue().
+                        catalogueIntQueue.clear();
                         return 5;
                     }
                     // Bouton filtre cliqué pendant la navigation
@@ -2186,6 +2495,16 @@ public final class VueGraphique extends VueConsole {
                         adminQueue.put(ao);
                         catalogueIntQueue.clear();
                         return 5; // sortir de naviguer()
+                    }
+                }
+
+                // CLIENT / VISITEUR : sortir de naviguer() si la sidebar a envoyé une action
+                if (sessionState == SessionState.CLIENT || sessionState == SessionState.VISITEUR) {
+                    String nav = clientNavQueue.poll();
+                    if (nav != null) {
+                        clientNavQueue.offer(nav); // remettre pour afficherMenuClient/Visiteur
+                        catalogueIntQueue.clear();
+                        return 5;
                     }
                 }
             }
@@ -2220,26 +2539,89 @@ public final class VueGraphique extends VueConsole {
         });
     }
 
+    /**
+     * Détermine si on est actuellement dans un flux admin en train de consulter
+     * la carte "gestionCatalogue". Dans ce cas, les listes affichées par le
+     * contrôleur (pendant une suppression, un ajout dans album, etc.) doivent
+     * apparaître dans la zone admin, pas dans la carte catalogue standard.
+     */
+    private boolean isAdminCatalogueContext() {
+        return sessionState == SessionState.ADMIN
+                && "gestionCatalogue".equals(cardCourante);
+    }
+
+    /**
+     * Remplit la zone de liste admin (adminCatalogueContent) avec le panneau donné.
+     * À appeler sur l'EDT.
+     */
+    private void setAdminCatalogueListe(JPanel content) {
+        if (adminCatalogueContent == null) return;
+        adminCatalogueContent.removeAll();
+        adminCatalogueContent.add(content);
+        adminCatalogueContent.revalidate();
+        adminCatalogueContent.repaint();
+    }
+
     @Override public void afficherListeMorceaux(List<Morceau> l) {
-        runOnEdt(() -> setCatalogueContent(buildListPanel("Morceaux (" + l.size() + ")", l,
+        JPanel panel = buildListPanel("Morceaux (" + l.size() + ")", l,
                 m -> m.getTitre() + " \u2014 " + m.getNomInterprete() + " (" + m.getDureeFormatee() + ")",
-                Morceau::getId, 1)));
+                Morceau::getId, 1);
+        runOnEdt(() -> {
+            if (isAdminCatalogueContext()) {
+                setAdminCatalogueListe(panel);
+            } else {
+                setCatalogueContent(panel);
+            }
+        });
+    }
+
+    /**
+     * Version SYNCHRONE de afficherListeMorceaux : n'utilise PAS runOnEdt.
+     * À appeler UNIQUEMENT depuis un Runnable déjà exécuté sur l'EDT.
+     * Utilisée par afficherMenuCatalogue() pour éviter le double invokeLater
+     * imbriqué qui causait des races au retour sur le catalogue.
+     */
+    private void afficherListeMorceauxDirect(List<Morceau> l) {
+        setCatalogueContent(buildListPanel("Morceaux (" + l.size() + ")", l,
+                m -> m.getTitre() + " \u2014 " + m.getNomInterprete() + " (" + m.getDureeFormatee() + ")",
+                Morceau::getId, 1));
     }
 
     @Override public void afficherListeAlbums(List<Album> l) {
-        runOnEdt(() -> setCatalogueContent(buildListPanel("Albums (" + l.size() + ")", l,
+        JPanel panel = buildListPanel("Albums (" + l.size() + ")", l,
                 a -> a.getTitre() + " \u2014 " + a.getNomInterprete() + " (" + a.getAnnee() + ")",
-                Album::getId, 2)));
+                Album::getId, 2);
+        runOnEdt(() -> {
+            if (isAdminCatalogueContext()) {
+                setAdminCatalogueListe(panel);
+            } else {
+                setCatalogueContent(panel);
+            }
+        });
     }
 
     @Override public void afficherListeArtistes(List<Artiste> l) {
-        runOnEdt(() -> setCatalogueContent(buildListPanel("Artistes (" + l.size() + ")", l,
-                a -> a.getNomComplet() + "  \u2022  " + a.getNationalite(), Artiste::getId, 3)));
+        JPanel panel = buildListPanel("Artistes (" + l.size() + ")", l,
+                a -> a.getNomComplet() + "  \u2022  " + a.getNationalite(), Artiste::getId, 3);
+        runOnEdt(() -> {
+            if (isAdminCatalogueContext()) {
+                setAdminCatalogueListe(panel);
+            } else {
+                setCatalogueContent(panel);
+            }
+        });
     }
 
     @Override public void afficherListeGroupes(List<Groupe> l) {
-        runOnEdt(() -> setCatalogueContent(buildListPanel("Groupes (" + l.size() + ")", l,
-                g -> g.getNom() + "  \u2022  " + g.getNationalite(), Groupe::getId, 4)));
+        JPanel panel = buildListPanel("Groupes (" + l.size() + ")", l,
+                g -> g.getNom() + "  \u2022  " + g.getNationalite(), Groupe::getId, 4);
+        runOnEdt(() -> {
+            if (isAdminCatalogueContext()) {
+                setAdminCatalogueListe(panel);
+            } else {
+                setCatalogueContent(panel);
+            }
+        });
     }
 
     @Override public void afficherDetailsMorceau(Morceau m) {
@@ -2399,6 +2781,7 @@ public final class VueGraphique extends VueConsole {
     // ========== PLAYLISTS ==========
 
     @Override public int afficherMenuPlaylist() {
+        playlistsQueue.clear(); // vider résidus
         runOnEdt(() -> showCard("playlists"));
         try {
             Object o = playlistsQueue.take();
@@ -2589,6 +2972,12 @@ public final class VueGraphique extends VueConsole {
     @Override public void notifierSessionClient(String nom) {
         setSessionState(SessionState.CLIENT, nom);
     }
+
+    /** Variante avec ID pour que la vue puisse recharger l'historique autonomement. */
+    public void notifierSessionClientAvecId(String nom, int id) {
+        this.utilisateurId = id;
+        setSessionState(SessionState.CLIENT, nom);
+    }
     @Override public void notifierSessionVisiteur() {
         setSessionState(SessionState.VISITEUR, null);
     }
@@ -2596,35 +2985,37 @@ public final class VueGraphique extends VueConsole {
     // ==================== ÉCOUTE ====================
 
     @Override public String demanderRechercheMusique() {
-        // Afficher la carte écoute et attendre que l'utilisateur tape + clique Rechercher
-        try {
-            if (SwingUtilities.isEventDispatchThread()) {
-                showCard("ecoute");
-                if (ecouteSearchField != null) {
-                    ecouteSearchField.setText("");
-                    ecouteSearchField.requestFocusInWindow();
-                }
-            } else {
-                try {
-                    SwingUtilities.invokeAndWait(() -> {
-                        showCard("ecoute");
-                        if (ecouteSearchField != null) {
-                            ecouteSearchField.setText("");
-                            ecouteSearchField.requestFocusInWindow();
-                        }
-                    });
-                } catch (java.lang.reflect.InvocationTargetException ex) { /* ignore */ }
+        // 1. Queue propre avant de commencer (élimine les "nav:xxx" résiduels
+        //    posés par onSidebarClick pendant la transition vers cette carte).
+        ecouteQueue.clear();
+
+        // 2. Affichage SYNCHRONE : showCard + liste des morceaux + focus champ.
+        //    Utilise afficherResultatsEcouteDirect (pas de runOnEdt imbriqué).
+        //    Garantit qu'au moment où on appelle ecouteQueue.take() ci-dessous,
+        //    les boutons ▶ existent et sont cliquables.
+        runOnEdtAndWait(() -> {
+            showCard("ecoute");
+            afficherResultatsEcouteDirect(model.Catalogue.getTousLesMorceaux());
+            if (ecouteSearchField != null) {
+                ecouteSearchField.setText("");
+                ecouteSearchField.requestFocusInWindow();
             }
-            // Attendre la valeur "search:..." poussée par le bouton Rechercher
+        });
+
+        // 3. Attente bloquante : clic ▶ (Integer), recherche ("search:..."),
+        //    ou signal de navigation ("nav:...") posé par la sidebar.
+        try {
             while (true) {
                 Object o = ecouteQueue.take();
-                if (o instanceof String && o.toString().startsWith("search:")) {
-                    return o.toString().substring(7); // texte après "search:"
+                if (o instanceof Integer) {
+                    // Clic ▶ direct : on remet l'id pour demanderIdMorceauEcoute()
+                    // et on retourne "" (= rechercherGlobal("") → tous les morceaux).
+                    ecouteQueue.offer(o);
+                    return "";
                 }
-                // Si c'est un Integer (clic ▶ avant recherche) on remet dans la queue
-                // et on retourne vide pour que le contrôleur relance
-                ecouteQueue.put(o);
-                return "";
+                String s = o.toString();
+                if (s.startsWith("search:")) { return s.substring(7); }
+                if (s.startsWith("nav:"))    { return "stop"; }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -2633,54 +3024,65 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public void afficherResultatsEcoute(List<Morceau> resultats) {
-        runOnEdt(() -> {
-            ecouteContentArea.removeAll();
-            if (resultats.isEmpty()) {
-                JLabel vide = Styles.mutedLabel("Aucun morceau trouv\u00e9.");
-                vide.setAlignmentX(Component.LEFT_ALIGNMENT);
-                ecouteContentArea.add(vide);
-            } else {
-                JLabel t = Styles.subtitleLabel("R\u00e9sultats (" + resultats.size() + ")");
-                t.setAlignmentX(Component.LEFT_ALIGNMENT);
-                t.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, Styles.PADDING_SM, 0));
-                ecouteContentArea.add(t);
-                for (Morceau m : resultats) {
-                    JPanel row = new JPanel(new BorderLayout());
-                    row.setBackground(Styles.BG_ALT);
-                    row.setBorder(BorderFactory.createCompoundBorder(
-                            BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
-                            BorderFactory.createEmptyBorder(10, 14, 10, 14)));
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
-                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    row.addMouseListener(new java.awt.event.MouseAdapter() {
-                        @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
-                        @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(Styles.BG_ALT); }
-                    });
+        runOnEdt(() -> afficherResultatsEcouteDirect(resultats));
+    }
 
-                    JLabel lbl = Styles.bodyLabel(m.getTitre() + " \u2014 " + m.getNomInterprete()
-                            + "  \u2022  " + m.getDureeFormatee());
-                    row.add(lbl, BorderLayout.CENTER);
+    /**
+     * Version SYNCHRONE de afficherResultatsEcoute : n'utilise PAS runOnEdt.
+     * À appeler UNIQUEMENT depuis un Runnable déjà exécuté sur l'EDT.
+     * Utilisée par demanderRechercheMusique() pour éviter le double invokeLater
+     * imbriqué (runOnEdt dans un runOnEdt) qui cassait l'affichage initial.
+     */
+    private void afficherResultatsEcouteDirect(List<Morceau> resultats) {
+        ecouteContentArea.removeAll();
+        if (resultats.isEmpty()) {
+            JLabel vide = Styles.mutedLabel("Aucun morceau trouv\u00e9.");
+            vide.setAlignmentX(Component.LEFT_ALIGNMENT);
+            ecouteContentArea.add(vide);
+        } else {
+            JLabel t = Styles.subtitleLabel("R\u00e9sultats (" + resultats.size() + ")");
+            t.setAlignmentX(Component.LEFT_ALIGNMENT);
+            t.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, Styles.PADDING_SM, 0));
+            ecouteContentArea.add(t);
+            for (Morceau m : resultats) {
+                JPanel row = new JPanel(new BorderLayout());
+                row.setBackground(Styles.BG_ALT);
+                row.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
+                        BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.addMouseListener(new java.awt.event.MouseAdapter() {
+                    @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
+                    @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(Styles.BG_ALT); }
+                });
 
-                    JButton btn = Styles.primaryButton("\u25B6 \u00c9couter");
-                    btn.setFont(Styles.FONT_SMALL);
-                    btn.addActionListener(e -> {
-                        try { ecouteQueue.put(m.getId()); } catch (InterruptedException ignored) {}
-                    });
-                    row.add(btn, BorderLayout.EAST);
-                    ecouteContentArea.add(row);
-                }
+                JLabel lbl = Styles.bodyLabel(m.getTitre() + " \u2014 " + m.getNomInterprete()
+                        + "  \u2022  " + m.getDureeFormatee());
+                row.add(lbl, BorderLayout.CENTER);
+
+                JButton btn = Styles.primaryButton("\u25B6 \u00c9couter");
+                btn.setFont(Styles.FONT_SMALL);
+                btn.addActionListener(e -> {
+                    try { ecouteQueue.put(m.getId()); } catch (InterruptedException ignored) {}
+                });
+                row.add(btn, BorderLayout.EAST);
+                ecouteContentArea.add(row);
             }
-            ecouteContentArea.revalidate();
-            ecouteContentArea.repaint();
-        });
+        }
+        ecouteContentArea.revalidate();
+        ecouteContentArea.repaint();
     }
 
     @Override public int demanderIdMorceauEcoute() {
         try {
-            Object o = ecouteQueue.take();
-            if (o instanceof Integer) return (Integer) o;
-            // search: prefix → on ignore, le contrôleur reposera la question
-            return -1;
+            while (true) {
+                Object o = ecouteQueue.take();
+                if (o instanceof Integer) return (Integer) o;
+                String s = o.toString();
+                if (s.startsWith("nav:")) return -1; // navigation sidebar → contrôleur ignorera
+                // search: ou autre → reboucle (attend un clic ▶)
+            }
         } catch (InterruptedException e) { return -1; }
     }
 
@@ -2718,6 +3120,12 @@ public final class VueGraphique extends VueConsole {
                 ecouteLimiteLabel.setText(""); // abonné : illimité
             }
         });
+        // Détecter une navigation sidebar pendant la lecture (ex: clic "Catalogue", "Historique"...)
+        // On consomme uniquement les vraies navigations (pas le signal "ecoute" d'entrée)
+        String navPendantLecture = clientNavQueue.peek();
+        if (navPendantLecture != null && !navPendantLecture.equals("ecoute")) {
+            return 2; // arrêter l'écoute pour traiter la navigation
+        }
         return 1; // continuer l'écoute
     }
 

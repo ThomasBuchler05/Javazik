@@ -1,7 +1,3 @@
 217;admin;admin;admin;admin;0
 227;Mathys;Mathys;adrien;mathys.picheret@gmail.com;1
-237;DD;SSS;lol;h@f;1
-134;t;t;t;t
 269;t;t;t;t;1
-167;a;a;a;a
-621;test;test;test;test

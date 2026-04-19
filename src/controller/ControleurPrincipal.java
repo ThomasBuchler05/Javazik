@@ -87,7 +87,13 @@ public class ControleurPrincipal {
             }
             if (utilisateur.verifierMdp(mdpSaisi)) {
                 vue.afficherConnexionReussie();
-                vue.notifierSessionClient(utilisateur.getNOM());
+                // Notifier avec l'ID pour que la vue puisse recharger l'historique autonomement
+                if (vue instanceof view.VueGraphique) {
+                    ((view.VueGraphique) vue).notifierSessionClientAvecId(
+                            utilisateur.getNOM(), utilisateur.getID());
+                } else {
+                    vue.notifierSessionClient(utilisateur.getNOM());
+                }
                 menuClient();
             } else {
                 vue.afficherMessage("Trop de tentatives, retour au menu principal.");
@@ -134,16 +140,48 @@ public class ControleurPrincipal {
         } while (choix != 13);
     }
 
+    // ==================== HELPERS ANNULATION ====================
+
+    /** Teste si une saisie entière admin signale une annulation/entrée invalide. */
+    private boolean isCancelled(int value) {
+        return value == VueGraphique.CANCEL_INT;
+    }
+
+    /** Teste si une saisie texte admin signale une annulation ou un champ vide. */
+    private boolean isCancelled(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    /** Affiche un message d'annulation standard et retourne true (pour early-return). */
+    private boolean annuler() {
+        vue.afficherMessage("Action annulee.");
+        return true;
+    }
+
+    // ==================== ADMIN : AJOUT / SUPPRESSION ====================
+
     private void adminAjouterMorceau() {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
 
         String titre = vue.demanderTitreMorceau();
+        if (isCancelled(titre)) { annuler(); return; }
+
         int duree = vue.demanderDureeMorceau();
+        if (isCancelled(duree)) { annuler(); return; }
+
         String genre = vue.demanderGenreMorceau();
+        if (isCancelled(genre)) { annuler(); return; }
+
         int annee = vue.demanderAnneeMorceau();
+        if (isCancelled(annee)) { annuler(); return; }
+
         int idArtiste = vue.demanderIdArtisteMorceau();
+        if (isCancelled(idArtiste)) { annuler(); return; }
+
         int idGroupe = vue.demanderIdGroupeMorceau();
+        if (isCancelled(idGroupe)) { annuler(); return; }
+
         Morceau m = Morceau.ajouter(titre, duree, genre, annee, idArtiste, idGroupe);
         vue.afficherMorceauAjoute(m.getId());
     }
@@ -151,8 +189,12 @@ public class ControleurPrincipal {
     private void adminSupprimerMorceau() {
         vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
         int id = vue.demanderIdSuppression();
+        if (isCancelled(id)) { annuler(); return; }
+
         if (Morceau.supprimer(id)) {
             vue.afficherElementSupprime("Morceau");
+            // Rafraîchir la liste après suppression
+            vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
         } else {
             vue.afficherElementNonTrouve("morceau", id);
         }
@@ -163,9 +205,17 @@ public class ControleurPrincipal {
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
 
         String titre = vue.demanderTitreAlbum();
+        if (isCancelled(titre)) { annuler(); return; }
+
         int annee = vue.demanderAnneeAlbum();
+        if (isCancelled(annee)) { annuler(); return; }
+
         int idArtiste = vue.demanderIdArtisteAlbum();
+        if (isCancelled(idArtiste)) { annuler(); return; }
+
         int idGroupe = vue.demanderIdGroupeAlbum();
+        if (isCancelled(idGroupe)) { annuler(); return; }
+
         Album a = Album.ajouter(titre, annee, idArtiste, idGroupe);
         vue.afficherAlbumAjoute(a.getId());
     }
@@ -173,8 +223,11 @@ public class ControleurPrincipal {
     private void adminSupprimerAlbum() {
         vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
         int id = vue.demanderIdSuppression();
+        if (isCancelled(id)) { annuler(); return; }
+
         if (Album.supprimer(id)) {
             vue.afficherElementSupprime("Album");
+            vue.afficherListeAlbums(Catalogue.getTousLesAlbums());
         } else {
             vue.afficherElementNonTrouve("album", id);
         }
@@ -182,8 +235,14 @@ public class ControleurPrincipal {
 
     private void adminAjouterArtiste() {
         String nom = vue.demanderNomArtiste();
+        if (isCancelled(nom)) { annuler(); return; }
+
         String prenom = vue.demanderPrenomArtiste();
+        if (isCancelled(prenom)) { annuler(); return; }
+
         String nationalite = vue.demanderNationaliteArtiste();
+        if (isCancelled(nationalite)) { annuler(); return; }
+
         Artiste a = Artiste.ajouter(nom, prenom, nationalite);
         vue.afficherArtisteAjoute(a.getId());
     }
@@ -191,8 +250,11 @@ public class ControleurPrincipal {
     private void adminSupprimerArtiste() {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         int id = vue.demanderIdSuppression();
+        if (isCancelled(id)) { annuler(); return; }
+
         if (Artiste.supprimer(id)) {
             vue.afficherElementSupprime("Artiste");
+            vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
         } else {
             vue.afficherElementNonTrouve("artiste", id);
         }
@@ -200,8 +262,14 @@ public class ControleurPrincipal {
 
     private void adminAjouterGroupe() {
         String nom = vue.demanderNomGroupe();
+        if (isCancelled(nom)) { annuler(); return; }
+
         int date = vue.demanderDateCreationGroupe();
+        if (isCancelled(date)) { annuler(); return; }
+
         String nationalite = vue.demanderNationaliteGroupe();
+        if (isCancelled(nationalite)) { annuler(); return; }
+
         Groupe g = Groupe.ajouter(nom, date, nationalite);
         vue.afficherGroupeAjoute(g.getId());
     }
@@ -209,8 +277,11 @@ public class ControleurPrincipal {
     private void adminSupprimerGroupe() {
         vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
         int id = vue.demanderIdSuppression();
+        if (isCancelled(id)) { annuler(); return; }
+
         if (Groupe.supprimer(id)) {
             vue.afficherElementSupprime("Groupe");
+            vue.afficherListeGroupes(Catalogue.getTousLesGroupes());
         } else {
             vue.afficherElementNonTrouve("groupe", id);
         }
@@ -227,6 +298,8 @@ public class ControleurPrincipal {
         }
 
         int idAlbum = vue.demanderIdAlbumAssociation();
+        if (isCancelled(idAlbum)) { annuler(); return; }
+
         Album album = Album.rechercherParId(idAlbum);
         if (album == null) {
             vue.afficherElementNonTrouve("album", idAlbum);
@@ -237,6 +310,8 @@ public class ControleurPrincipal {
         vue.afficherListeMorceaux(Catalogue.getTousLesMorceaux());
 
         int idMorceau = vue.demanderIdMorceauAssociation();
+        if (isCancelled(idMorceau)) { annuler(); return; }
+
         Morceau morceau = Morceau.rechercherParId(idMorceau);
         if (morceau == null) {
             vue.afficherElementNonTrouve("morceau", idMorceau);
@@ -251,6 +326,8 @@ public class ControleurPrincipal {
         }
 
         int numPiste = vue.demanderNumeroPiste();
+        if (isCancelled(numPiste)) { annuler(); return; }
+
         if (Album.ajouterMorceau(idAlbum, idMorceau, numPiste)) {
             vue.afficherMorceauAjouteDansAlbum(morceau.getTitre(), album.getTitre());
         } else {
@@ -269,6 +346,8 @@ public class ControleurPrincipal {
         }
 
         int idGroupe = vue.demanderIdGroupeAssociation();
+        if (isCancelled(idGroupe)) { annuler(); return; }
+
         Groupe groupe = Groupe.rechercherParId(idGroupe);
         if (groupe == null) {
             vue.afficherElementNonTrouve("groupe", idGroupe);
@@ -279,6 +358,8 @@ public class ControleurPrincipal {
         vue.afficherListeArtistes(Catalogue.getTousLesArtistes());
 
         int idArtiste = vue.demanderIdArtisteAssociation();
+        if (isCancelled(idArtiste)) { annuler(); return; }
+
         Artiste artiste = Artiste.rechercherParId(idArtiste);
         if (artiste == null) {
             vue.afficherElementNonTrouve("artiste", idArtiste);
