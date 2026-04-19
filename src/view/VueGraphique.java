@@ -1116,7 +1116,7 @@ public final class VueGraphique extends VueConsole {
         catalogueSearchField.setToolTipText("Rechercher un morceau, album, artiste ou groupe...");
         searchBar.add(catalogueSearchField, BorderLayout.CENTER);
 
-        JButton btnSearch = Styles.primaryButton("\uD83D\uDD0D Rechercher");
+        JButton btnSearch = Styles.primaryButton("Rechercher");
         btnSearch.setPreferredSize(new Dimension(130, 40));
         searchBar.add(btnSearch, BorderLayout.EAST);
 
@@ -1419,12 +1419,30 @@ public final class VueGraphique extends VueConsole {
     private JPanel          playlistsFormPanel;   // formulaire inline création/renommage
     private JTextField      playlistsFormField;   // champ texte du formulaire
     private JLabel          playlistsFormTitle;   // titre du formulaire ("Nouvelle playlist" / "Renommer")
+    // --- Lecteur inline (visible pendant la lecture d'une playlist) ---
+    private JPanel          playlistsLecteurPanel;
+    private JLabel          playlistsLecteurTitre;
+    private JLabel          playlistsLecteurArtiste;
+    private JProgressBar    playlistsLecteurBar;
+    private JButton         playlistsLecteurPrev;
+    private JButton         playlistsLecteurNext;
+    private JButton         playlistsLecteurStop;
+    private JButton         playlistsLecteurPause;
+    private volatile boolean lecteurEnPause = false;
+    /** Queue pour les contrôles du lecteur playlist : 1=prev, 2=next, 3=stop, 4=pause/reprise */
+    private final java.util.concurrent.LinkedBlockingQueue<Integer> lecteurPlaylistQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
     private final java.util.concurrent.LinkedBlockingQueue<Object> playlistsQueue =
             new java.util.concurrent.LinkedBlockingQueue<>();
     private final java.util.concurrent.SynchronousQueue<String> playlistsNomQueue =
             new java.util.concurrent.SynchronousQueue<>();
     private List<model.Playlist> playlistsCourantes = new java.util.ArrayList<>();
     private model.Playlist       playlistSelectionnee = null;
+    /** Id du morceau sélectionné via le picker — résolu avant de pousser dans playlistsQueue. */
+    private volatile int morceauChoisiId = -1;
+    /** true quand on est en train d'ajouter un morceau depuis la vue playlists —
+     *  permet de court-circuiter demanderRechercheMusique() qui naviguerait vers Écouter. */
+    private volatile boolean contexteAjoutPlaylist = false;
 
     private JPanel buildPlaylistsCard() {
         JPanel card = new JPanel(new BorderLayout());
@@ -1573,6 +1591,98 @@ public final class VueGraphique extends VueConsole {
         split.setLeftComponent(leftOuter);
         split.setRightComponent(playlistsDetailPanel);
         card.add(split, BorderLayout.CENTER);
+
+        // ===== LECTEUR INLINE en bas (visible pendant la lecture) =====
+        playlistsLecteurPanel = new JPanel(new BorderLayout(Styles.PADDING_MD, 0));
+        playlistsLecteurPanel.setBackground(new Color(18, 90, 91));
+        playlistsLecteurPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(2, 0, 0, 0, Styles.TEAL_DARK),
+                BorderFactory.createEmptyBorder(Styles.PADDING_MD, Styles.PADDING_LG,
+                        Styles.PADDING_MD, Styles.PADDING_LG)));
+        playlistsLecteurPanel.setVisible(false);
+
+        // Icône musicale
+        JLabel ico = new JLabel("~J~");
+        ico.setFont(new Font(Styles.FONT_BODY.getFamily(), Font.BOLD, 14));
+        ico.setForeground(new Color(130, 220, 220));
+        ico.setBorder(new EmptyBorder(0, 0, 0, Styles.PADDING_MD));
+        playlistsLecteurPanel.add(ico, BorderLayout.WEST);
+
+        // Infos titre + barre de progression
+        JPanel infoPanel = new JPanel();
+        infoPanel.setOpaque(false);
+        infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
+
+        playlistsLecteurTitre = new JLabel("—");
+        playlistsLecteurTitre.setFont(Styles.FONT_SMALL_BOLD);
+        playlistsLecteurTitre.setForeground(Color.WHITE);
+        playlistsLecteurTitre.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        playlistsLecteurArtiste = new JLabel("");
+        playlistsLecteurArtiste.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.PLAIN, 11));
+        playlistsLecteurArtiste.setForeground(new Color(160, 220, 220));
+        playlistsLecteurArtiste.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        playlistsLecteurBar = new JProgressBar(0, 100);
+        playlistsLecteurBar.setValue(0);
+        playlistsLecteurBar.setStringPainted(false);
+        playlistsLecteurBar.setForeground(new Color(0, 200, 180));
+        playlistsLecteurBar.setBackground(new Color(40, 110, 112));
+        playlistsLecteurBar.setBorder(null);
+        playlistsLecteurBar.setPreferredSize(new Dimension(0, 4));
+        playlistsLecteurBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 4));
+        playlistsLecteurBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        infoPanel.add(playlistsLecteurTitre);
+        infoPanel.add(Box.createVerticalStrut(2));
+        infoPanel.add(playlistsLecteurArtiste);
+        infoPanel.add(Box.createVerticalStrut(6));
+        infoPanel.add(playlistsLecteurBar);
+        playlistsLecteurPanel.add(infoPanel, BorderLayout.CENTER);
+
+        // Boutons de contrôle
+        JPanel ctrlPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, Styles.PADDING_SM, 0));
+        ctrlPanel.setOpaque(false);
+
+        playlistsLecteurPrev  = new JButton("|<");
+        playlistsLecteurPause = new JButton("||");
+        playlistsLecteurNext  = new JButton(">|");
+        playlistsLecteurStop  = new JButton("Stop");
+
+        for (JButton b : new JButton[]{playlistsLecteurPrev, playlistsLecteurPause, playlistsLecteurNext, playlistsLecteurStop}) {
+            b.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.BOLD, 13));
+            b.setForeground(Color.WHITE);
+            b.setBackground(new Color(0, 100, 100));
+            b.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(0, 150, 150), 1, true),
+                    BorderFactory.createEmptyBorder(5, 12, 5, 12)));
+            b.setFocusPainted(false);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+        playlistsLecteurPrev.addActionListener(e -> {
+            lecteurEnPause = false;
+            lecteurPlaylistQueue.offer(1);
+        });
+        playlistsLecteurPause.addActionListener(e -> {
+            lecteurEnPause = !lecteurEnPause;
+            playlistsLecteurPause.setText(lecteurEnPause ? ">" : "||");
+        });
+        playlistsLecteurNext.addActionListener(e -> {
+            lecteurEnPause = false;
+            lecteurPlaylistQueue.offer(2);
+        });
+        playlistsLecteurStop.addActionListener(e -> {
+            lecteurEnPause = false;
+            lecteurPlaylistQueue.offer(3);
+        });
+
+        ctrlPanel.add(playlistsLecteurPrev);
+        ctrlPanel.add(playlistsLecteurPause);
+        ctrlPanel.add(playlistsLecteurNext);
+        ctrlPanel.add(playlistsLecteurStop);
+        playlistsLecteurPanel.add(ctrlPanel, BorderLayout.EAST);
+
+        card.add(playlistsLecteurPanel, BorderLayout.SOUTH);
         return card;
     }
 
@@ -1701,15 +1811,27 @@ public final class VueGraphique extends VueConsole {
 
         JButton btnAjouter   = Styles.primaryButton("+ Ajouter morceau");
         JButton btnRetirer   = Styles.secondaryButton("\u2212 Retirer morceau");
-        JButton btnEcouter   = Styles.primaryButton("\u25B6 \u00c9couter");
+        JButton btnEcouter   = Styles.primaryButton("Ecouter");
         JButton btnRenommer  = Styles.secondaryButton("Renommer");
         JButton btnSupprimer = Styles.dangerButton("Supprimer");
 
         for (JButton b : new JButton[]{btnAjouter, btnRetirer, btnEcouter, btnRenommer, btnSupprimer})
             b.setFont(Styles.FONT_SMALL);
 
-        btnAjouter .addActionListener(e -> { try { playlistsQueue.put("ajouter:"  + p.getId()); } catch (InterruptedException ignored) {} });
-        btnRetirer .addActionListener(e -> { try { playlistsQueue.put("retirer:"  + p.getId()); } catch (InterruptedException ignored) {} });
+        btnAjouter.addActionListener(e -> {
+            List<model.Morceau> catalogue = model.Catalogue.getTousLesMorceaux();
+            morceauChoisiId = showMorceauPicker(catalogue, "Ajouter un morceau", "Choisir un morceau à ajouter");
+            if (morceauChoisiId == -1) return; // annulé
+            contexteAjoutPlaylist = true;
+            try { playlistsQueue.put("ajouter:" + p.getId()); } catch (InterruptedException ignored) {}
+        });
+        btnRetirer.addActionListener(e -> {
+            if (p.getMorceaux().isEmpty()) return;
+            morceauChoisiId = showMorceauPicker(p.getMorceaux(), "Retirer un morceau", "Choisir le morceau à retirer");
+            if (morceauChoisiId == -1) return; // annulé
+            contexteAjoutPlaylist = true;
+            try { playlistsQueue.put("retirer:" + p.getId()); } catch (InterruptedException ignored) {}
+        });
         btnEcouter .addActionListener(e -> { try { playlistsQueue.put("ecouter:"  + p.getId()); } catch (InterruptedException ignored) {} });
         btnRenommer.addActionListener(e -> { try { playlistsQueue.put("renommer:" + p.getId()); } catch (InterruptedException ignored) {} });
         btnSupprimer.addActionListener(e -> { try { playlistsQueue.put("supprimer:" + p.getId()); } catch (InterruptedException ignored) {} });
@@ -1820,6 +1942,14 @@ public final class VueGraphique extends VueConsole {
     private JLabel          ecouteInterpreteLabel;
     private JLabel          ecouteLimiteLabel;
     private JPanel          ecoutePlayerPanel;
+    private JButton         ecouteBtnPrev;
+    private JButton         ecouteBtnPause;
+    private JButton         ecouteBtnNext;
+    private JButton         ecouteBtnStop;
+    private volatile boolean ecouteEnPause = false;
+    /** Queue contrôles lecteur standalone : "pause", "stop", "prev", "next" */
+    private final java.util.concurrent.LinkedBlockingQueue<String> ecouteControleQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>();
     private final java.util.concurrent.LinkedBlockingQueue<Object> ecouteQueue =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
@@ -1853,7 +1983,7 @@ public final class VueGraphique extends VueConsole {
         ecouteSearchField.setToolTipText("Rechercher un morceau...");
         searchBar.add(ecouteSearchField, BorderLayout.CENTER);
 
-        JButton btnSearch = Styles.primaryButton("\uD83D\uDD0D Rechercher");
+        JButton btnSearch = Styles.primaryButton("Rechercher");
         btnSearch.setPreferredSize(new Dimension(130, 40));
         searchBar.add(btnSearch, BorderLayout.EAST);
         topBar.add(searchBar);
@@ -1885,14 +2015,18 @@ public final class VueGraphique extends VueConsole {
         card.add(scroll, BorderLayout.CENTER);
 
         // ---- Lecteur en bas ----
-        ecoutePlayerPanel = new JPanel();
+        ecoutePlayerPanel = new JPanel(new BorderLayout(Styles.PADDING_MD, 0));
         ecoutePlayerPanel.setBackground(Styles.BG_ALT);
-        ecoutePlayerPanel.setLayout(new BoxLayout(ecoutePlayerPanel, BoxLayout.Y_AXIS));
         ecoutePlayerPanel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, Styles.BORDER),
                 BorderFactory.createEmptyBorder(Styles.PADDING_MD, Styles.PADDING_LG * 2,
                         Styles.PADDING_MD, Styles.PADDING_LG * 2)));
         ecoutePlayerPanel.setVisible(false);
+
+        // Infos titre + barre
+        JPanel ecouteInfoPanel = new JPanel();
+        ecouteInfoPanel.setOpaque(false);
+        ecouteInfoPanel.setLayout(new BoxLayout(ecouteInfoPanel, BoxLayout.Y_AXIS));
 
         ecouteTitreCourant = new JLabel("—");
         ecouteTitreCourant.setFont(Styles.FONT_BODY_BOLD);
@@ -1913,11 +2047,57 @@ public final class VueGraphique extends VueConsole {
         ecouteProgressBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 6));
         ecouteProgressBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        ecoutePlayerPanel.add(ecouteTitreCourant);
-        ecoutePlayerPanel.add(Box.createVerticalStrut(2));
-        ecoutePlayerPanel.add(ecouteInterpreteLabel);
-        ecoutePlayerPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
-        ecoutePlayerPanel.add(ecouteProgressBar);
+        ecouteInfoPanel.add(ecouteTitreCourant);
+        ecouteInfoPanel.add(Box.createVerticalStrut(2));
+        ecouteInfoPanel.add(ecouteInterpreteLabel);
+        ecouteInfoPanel.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        ecouteInfoPanel.add(ecouteProgressBar);
+        ecoutePlayerPanel.add(ecouteInfoPanel, BorderLayout.CENTER);
+
+        // Boutons de contrôle
+        JPanel ecouteCtrlPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, Styles.PADDING_SM, 0));
+        ecouteCtrlPanel.setOpaque(false);
+
+        ecouteBtnPrev  = new JButton("|<");
+        ecouteBtnPause = new JButton("||");
+        ecouteBtnNext  = new JButton(">|");
+        ecouteBtnStop  = new JButton("Stop");
+
+        for (JButton b : new JButton[]{ecouteBtnPrev, ecouteBtnPause, ecouteBtnNext, ecouteBtnStop}) {
+            b.setFont(Styles.FONT_SMALL_BOLD);
+            b.setForeground(Styles.TEAL_DARK);
+            b.setBackground(Styles.BG_MAIN);
+            b.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                    BorderFactory.createEmptyBorder(5, 14, 5, 14)));
+            b.setFocusPainted(false);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+
+        ecouteBtnPrev.addActionListener(e -> {
+            ecouteEnPause = false;
+            ecouteBtnPause.setText("||");
+            ecouteControleQueue.offer("prev");
+        });
+        ecouteBtnPause.addActionListener(e -> {
+            ecouteEnPause = !ecouteEnPause;
+            ecouteBtnPause.setText(ecouteEnPause ? ">" : "||");
+        });
+        ecouteBtnNext.addActionListener(e -> {
+            ecouteEnPause = false;
+            ecouteBtnPause.setText("||");
+            ecouteControleQueue.offer("next");
+        });
+        ecouteBtnStop.addActionListener(e -> {
+            ecouteEnPause = false;
+            ecouteControleQueue.offer("stop");
+        });
+
+        ecouteCtrlPanel.add(ecouteBtnPrev);
+        ecouteCtrlPanel.add(ecouteBtnPause);
+        ecouteCtrlPanel.add(ecouteBtnNext);
+        ecouteCtrlPanel.add(ecouteBtnStop);
+        ecoutePlayerPanel.add(ecouteCtrlPanel, BorderLayout.EAST);
 
         card.add(ecoutePlayerPanel, BorderLayout.SOUTH);
 
@@ -1948,9 +2128,30 @@ public final class VueGraphique extends VueConsole {
         topBar.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2,
                 Styles.PADDING_MD, Styles.PADDING_LG * 2));
 
+        // Ligne titre + bouton supprimer
+        JPanel titreRow = new JPanel(new BorderLayout());
+        titreRow.setOpaque(false);
+        titreRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         JLabel titre = Styles.titleLabel("Mon historique d'\u00e9coute");
-        titre.setAlignmentX(Component.LEFT_ALIGNMENT);
-        topBar.add(titre);
+        titreRow.add(titre, BorderLayout.CENTER);
+
+        JButton btnSupprimerHistorique = Styles.dangerButton("Effacer l'historique");
+        btnSupprimerHistorique.setFont(Styles.FONT_SMALL);
+        btnSupprimerHistorique.addActionListener(e -> {
+            int confirm = JOptionPane.showConfirmDialog(
+                    fenetre,
+                    "Voulez-vous vraiment supprimer tout votre historique d'\u00e9coute ?",
+                    "Confirmer la suppression",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (confirm == JOptionPane.YES_OPTION && utilisateurId > 0) {
+                model.Historique.supprimerHistoriqueClient(utilisateurId);
+                afficherHistorique(new java.util.ArrayList<>());
+            }
+        });
+        titreRow.add(btnSupprimerHistorique, BorderLayout.EAST);
+        topBar.add(titreRow);
         topBar.add(Box.createVerticalStrut(Styles.PADDING_SM));
 
         JLabel sub = Styles.mutedLabel("Les morceaux que vous avez \u00e9cout\u00e9s r\u00e9cemment.");
@@ -3579,15 +3780,14 @@ public final class VueGraphique extends VueConsole {
             showCard("statistiques");
             if (adminStatsCard == null) return;
 
-            // Reconstruction complète de la carte
             adminStatsCard.removeAll();
+            adminStatsCard.setLayout(new BorderLayout());
 
             // En-tête
             JPanel top = new JPanel();
             top.setBackground(Styles.BG_MAIN);
             top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
             top.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_MD, Styles.PADDING_LG * 2));
-
             JLabel titre = Styles.titleLabel("Statistiques");
             titre.setAlignmentX(Component.LEFT_ALIGNMENT);
             top.add(titre);
@@ -3597,43 +3797,133 @@ public final class VueGraphique extends VueConsole {
             top.add(sub);
             adminStatsCard.add(top, BorderLayout.NORTH);
 
+            // Contenu scrollable (tuiles + tableau notes)
+            JPanel scrollContent = new JPanel();
+            scrollContent.setBackground(Styles.BG_MAIN);
+            scrollContent.setLayout(new BoxLayout(scrollContent, BoxLayout.Y_AXIS));
+
             // Grille de tuiles
             JPanel grid = new JPanel(new GridLayout(0, 3, Styles.PADDING_LG, Styles.PADDING_LG));
             grid.setBackground(Styles.BG_MAIN);
-            grid.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2));
+            grid.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG, Styles.PADDING_LG * 2));
+            grid.setAlignmentX(Component.LEFT_ALIGNMENT);
 
             Object[][] stats = {
-                    {"\uD83C\uDFB5 Morceaux",    nbM,  Styles.TEAL},
-                    {"\uD83D\uDCBF Albums",       nbA,  new Color(99, 102, 241)},
-                    {"\uD83C\uDFA4 Artistes",     nbAr, new Color(16, 185, 129)},
-                    {"\uD83C\uDFB8 Groupes",      nbG,  new Color(245, 158, 11)},
-                    {"\uD83D\uDC64 Utilisateurs", nbU,  new Color(59, 130, 246)},
-                    {"\u25B6 \u00c9coutes totales",nbE, new Color(239, 68, 68)},
+                    {"Morceaux",      nbM,  Styles.TEAL},
+                    {"Albums",        nbA,  new Color(99, 102, 241)},
+                    {"Artistes",      nbAr, new Color(16, 185, 129)},
+                    {"Groupes",       nbG,  new Color(245, 158, 11)},
+                    {"Utilisateurs",  nbU,  new Color(59, 130, 246)},
+                    {"Ecoutes totales", nbE, new Color(239, 68, 68)},
             };
             for (Object[] s : stats) {
                 JPanel tile = Styles.cardPanel();
                 tile.setLayout(new BoxLayout(tile, BoxLayout.Y_AXIS));
                 tile.setBorder(BorderFactory.createCompoundBorder(
                         BorderFactory.createLineBorder(Styles.BORDER, 1, true),
-                        BorderFactory.createEmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG, Styles.PADDING_MD, Styles.PADDING_LG)
-                ));
-
+                        BorderFactory.createEmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG, Styles.PADDING_MD, Styles.PADDING_LG)));
                 JLabel val = new JLabel("" + s[1]);
                 val.setFont(Styles.FONT_TITLE.deriveFont(Font.BOLD, 40f));
                 val.setForeground((Color) s[2]);
                 val.setAlignmentX(Component.LEFT_ALIGNMENT);
-
                 JLabel lbl = Styles.mutedLabel(s[0].toString());
                 lbl.setFont(Styles.FONT_BODY_BOLD);
                 lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-
                 tile.add(val);
                 tile.add(Box.createVerticalStrut(4));
                 tile.add(lbl);
                 grid.add(tile);
             }
+            scrollContent.add(grid);
 
-            adminStatsCard.add(grid, BorderLayout.CENTER);
+            // ---- Tableau des notes ----
+            List<int[]> morceauxNotes = model.Morceau.getMorceauxNotes();
+
+            JPanel notesSection = new JPanel();
+            notesSection.setBackground(Styles.BG_MAIN);
+            notesSection.setLayout(new BoxLayout(notesSection, BoxLayout.Y_AXIS));
+            notesSection.setBorder(new EmptyBorder(0, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2, Styles.PADDING_LG * 2));
+            notesSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JLabel titreNotes = Styles.subtitleLabel("Notes des morceaux");
+            titreNotes.setAlignmentX(Component.LEFT_ALIGNMENT);
+            titreNotes.setBorder(new EmptyBorder(0, 0, Styles.PADDING_SM, 0));
+            notesSection.add(titreNotes);
+
+            if (morceauxNotes.isEmpty()) {
+                JLabel aucune = Styles.mutedLabel("Aucune note enregistr\u00e9e pour l'instant.");
+                aucune.setAlignmentX(Component.LEFT_ALIGNMENT);
+                notesSection.add(aucune);
+            } else {
+                // En-tête tableau
+                JPanel header = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
+                header.setBackground(Styles.TEAL_SURFACE);
+                header.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 14));
+                header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+                header.setAlignmentX(Component.LEFT_ALIGNMENT);
+                for (String col : new String[]{"Morceau", "Artiste / Groupe", "Note moyenne", "Nb votes"}) {
+                    JLabel h = new JLabel(col);
+                    h.setFont(Styles.FONT_SMALL_BOLD);
+                    h.setForeground(Styles.TEAL_DARK);
+                    header.add(h);
+                }
+                notesSection.add(header);
+                notesSection.add(Box.createVerticalStrut(2));
+
+                // Lignes
+                for (int i = 0; i < morceauxNotes.size(); i++) {
+                    int[] entry = morceauxNotes.get(i);
+                    int idM = entry[0];
+                    double moyenne = entry[1] / 10.0;
+                    int nbVotes = entry[2];
+
+                    model.Morceau m = model.Morceau.rechercherParId(idM);
+                    String titreM = m != null ? m.getTitre() : "ID " + idM;
+                    String artiste = m != null ? m.getNomInterprete() : "—";
+
+                    Color rowBg = (i % 2 == 0) ? Styles.BG_MAIN : Styles.BG_ALT;
+                    JPanel row = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
+                    row.setBackground(rowBg);
+                    row.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
+                            BorderFactory.createEmptyBorder(8, 14, 8, 14)));
+                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+                    JLabel lblTitre = Styles.bodyLabel(titreM);
+                    JLabel lblArtiste = Styles.bodyLabel(artiste);
+                    lblArtiste.setForeground(Styles.TEXT_MUTED);
+
+                    // Note moyenne avec barre colorée
+                    JPanel noteCell = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+                    noteCell.setBackground(rowBg);
+                    JLabel lblMoyenne = new JLabel(String.format("%.1f / 5", moyenne));
+                    lblMoyenne.setFont(Styles.FONT_SMALL_BOLD);
+                    lblMoyenne.setForeground(moyenne >= 4 ? new Color(22, 163, 74)
+                            : moyenne >= 3 ? new Color(202, 138, 4)
+                              : new Color(220, 38, 38));
+                    noteCell.add(lblMoyenne);
+
+                    JLabel lblVotes = Styles.bodyLabel(nbVotes + " vote" + (nbVotes > 1 ? "s" : ""));
+                    lblVotes.setForeground(Styles.TEXT_MUTED);
+
+                    row.add(lblTitre);
+                    row.add(lblArtiste);
+                    row.add(noteCell);
+                    row.add(lblVotes);
+                    notesSection.add(row);
+                }
+            }
+            scrollContent.add(notesSection);
+            scrollContent.add(Box.createVerticalGlue());
+
+            JScrollPane scroll = new JScrollPane(scrollContent);
+            scroll.setBorder(null);
+            scroll.getViewport().setBackground(Styles.BG_MAIN);
+            scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            scroll.getVerticalScrollBar().setUnitIncrement(16);
+            adminStatsCard.add(scroll, BorderLayout.CENTER);
+
             adminStatsCard.revalidate();
             adminStatsCard.repaint();
         });
@@ -4084,11 +4374,23 @@ public final class VueGraphique extends VueConsole {
     // ========== PLAYLISTS ==========
 
     @Override public int afficherMenuPlaylist() {
-        playlistsQueue.clear(); // vider résidus
+        playlistsQueue.clear();  // vider résidus d'actions précédentes
+        clientNavQueue.clear();  // vider résidus de navigation
         runOnEdt(() -> showCard("playlists"));
         try {
             while (true) {
-                Object o = playlistsQueue.take();
+                // Vérifier d'abord si un clic sidebar a demandé une navigation
+                String nav = clientNavQueue.poll();
+                if (nav != null && !nav.equals("playlists")) {
+                    // L'utilisateur a cliqué sur une autre section : on remet le signal
+                    // dans clientNavQueue pour que afficherMenuClient() le consomme,
+                    // puis on retourne "retour" (8) pour sortir de menuPlaylist()
+                    clientNavQueue.offer(nav);
+                    return 8;
+                }
+
+                Object o = playlistsQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (o == null) continue; // timeout : reboucler pour vérifier clientNavQueue
                 String s = o.toString();
                 if (s.equals("new"))            return 1;
                 if (s.startsWith("voir:"))      return 5;
@@ -4098,7 +4400,6 @@ public final class VueGraphique extends VueConsole {
                 if (s.startsWith("renommer:"))  return 6;
                 if (s.startsWith("supprimer:")) return 7;
                 if (s.equals("retour"))         return 8;
-                // Reboucle sur les clics de navigation sans valeur utile
             }
         } catch (InterruptedException e) { return 8; }
     }
@@ -4124,42 +4425,224 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public int demanderIdPlaylist() {
-        // L'id est déjà encodé dans la valeur poussée par le bouton cliqué
-        try {
-            Object o = playlistsQueue.take();
-            String s = o.toString();
-            for (String prefix : new String[]{"voir:", "ajouter:", "retirer:", "ecouter:", "renommer:", "supprimer:"}) {
-                if (s.startsWith(prefix)) {
-                    return Integer.parseInt(s.substring(prefix.length()));
-                }
-            }
-            return -1;
-        } catch (InterruptedException e) { return -1; }
+        // La playlist est déjà sélectionnée via le clic dans la sidebar gauche.
+        // On la retourne directement sans re-bloquer sur la queue (ce qui
+        // provoquerait un double-clic nécessaire et une navigation erratique).
+        return playlistSelectionnee != null ? playlistSelectionnee.getId() : -1;
     }
 
     @Override public int demanderIdMorceau() {
-        // Pour retirer : choisir parmi les morceaux de la playlist sélectionnée
-        if (playlistSelectionnee != null && !playlistSelectionnee.getMorceaux().isEmpty()) {
-            List<model.Morceau> morceaux = playlistSelectionnee.getMorceaux();
-            String[] options = morceaux.stream()
-                    .map(m -> "[" + m.getId() + "] " + m.getTitre())
-                    .toArray(String[]::new);
-            final int[] result = {-1};
-            try {
-                SwingUtilities.invokeAndWait(() -> {
-                    Object choix = JOptionPane.showInputDialog(
-                            fenetre, "Choisissez un morceau :", "S\u00e9lection",
-                            JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
-                    if (choix != null) {
-                        String s = choix.toString();
-                        result[0] = Integer.parseInt(s.substring(1, s.indexOf(']')));
-                    }
-                });
-            } catch (Exception ignored) {}
-            return result[0];
-        }
-        String val = promptText("ID du morceau", "Entrez l'ID du morceau :");
-        try { return Integer.parseInt(val.trim()); } catch (NumberFormatException e) { return -1; }
+        // Le picker a déjà été ouvert et résolu depuis l'EDT par le bouton Ajouter/Retirer.
+        contexteAjoutPlaylist = false; // reset du flag après lecture
+        return morceauChoisiId;
+    }
+
+    /**
+     * Affiche une modale de sélection de morceau avec recherche live.
+     * @param source  liste de morceaux à afficher
+     * @param titreDialog  titre de la fenêtre
+     * @param sousTitre    sous-titre affiché dans la modale
+     * @return id du morceau sélectionné, ou -1 si annulé
+     */
+    private int showMorceauPicker(List<model.Morceau> source, String titreDialog, String sousTitre) {
+        JDialog dialog = new JDialog(fenetre, titreDialog, true);
+        dialog.setSize(540, 500);
+        dialog.setLocationRelativeTo(fenetre);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.getContentPane().setBackground(Styles.BG_MAIN);
+
+        final int[] chosen = {-1};
+
+        JPanel root = new JPanel(new BorderLayout(0, 0));
+        root.setBackground(Styles.BG_MAIN);
+        root.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                Styles.PADDING_MD, Styles.PADDING_LG));
+
+        // --- En-tête ---
+        JPanel header = new JPanel();
+        header.setOpaque(false);
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        JLabel lblTitreDialog = Styles.subtitleLabel("\uD83C\uDFB5  " + sousTitre);
+        lblTitreDialog.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.add(lblTitreDialog);
+        header.add(Box.createVerticalStrut(Styles.PADDING_MD));
+
+        // --- Champ de recherche ---
+        JPanel searchRow = new JPanel(new BorderLayout(Styles.PADDING_SM, 0));
+        searchRow.setOpaque(false);
+        JTextField searchField = new JTextField();
+        searchField.setFont(Styles.FONT_SMALL);
+        searchField.putClientProperty("JTextField.placeholderText", "Rechercher par titre, artiste, genre\u2026");
+        searchField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                BorderFactory.createEmptyBorder(7, 10, 7, 10)));
+        searchField.setBackground(Color.WHITE);
+        JLabel searchIcon = new JLabel("\uD83D\uDD0D");
+        searchIcon.setFont(Styles.FONT_BODY);
+        searchIcon.setBorder(new EmptyBorder(0, 0, 0, Styles.PADDING_SM));
+        searchRow.add(searchIcon, BorderLayout.WEST);
+        searchRow.add(searchField, BorderLayout.CENTER);
+        header.add(searchRow);
+        header.add(Box.createVerticalStrut(Styles.PADDING_SM));
+
+        // Compteur de résultats
+        JLabel lblCount = Styles.mutedLabel(source.size() + " morceau(x)");
+        lblCount.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblCount.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.PLAIN, 11));
+        header.add(lblCount);
+        header.add(Box.createVerticalStrut(Styles.PADDING_SM));
+
+        root.add(header, BorderLayout.NORTH);
+
+        // --- Liste des résultats ---
+        JPanel listPanel = new JPanel();
+        listPanel.setBackground(Styles.BG_ALT);
+        listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
+
+        JScrollPane scroll = new JScrollPane(listPanel);
+        scroll.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.BORDER),
+                BorderFactory.createEmptyBorder(0, 0, 0, 0)));
+        scroll.getViewport().setBackground(Styles.BG_ALT);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+
+        // Remplissage / filtrage de la liste
+        Runnable fillList = () -> {
+            listPanel.removeAll();
+            String query = searchField.getText().trim().toLowerCase();
+            java.util.List<model.Morceau> filtered = source.stream()
+                    .filter(m -> query.isEmpty()
+                            || m.getTitre().toLowerCase().contains(query)
+                            || m.getNomInterprete().toLowerCase().contains(query)
+
+                            || m.getGenre().toLowerCase().contains(query))
+                    .collect(java.util.stream.Collectors.toList());
+
+            lblCount.setText(filtered.size() + " résultat(s)");
+
+            if (filtered.isEmpty()) {
+                JPanel videPanel = new JPanel(new GridBagLayout());
+                videPanel.setBackground(Styles.BG_ALT);
+                videPanel.setPreferredSize(new Dimension(0, 120));
+                JLabel videLabel = Styles.mutedLabel("Aucun résultat pour « " + query + " »");
+                videLabel.setFont(Styles.FONT_SMALL);
+                videPanel.add(videLabel);
+                videPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+                listPanel.add(videPanel);
+            } else {
+                int num = 0;
+                for (model.Morceau m : filtered) {
+                    boolean alt = (num % 2 == 0);
+                    num++;
+
+                    JPanel row = new JPanel(new BorderLayout(Styles.PADDING_MD, 0));
+                    row.setBackground(alt ? new Color(248, 253, 253) : Color.WHITE);
+                    row.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(230, 238, 238)),
+                            BorderFactory.createEmptyBorder(9, 14, 9, 14)));
+                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 54));
+                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+                    // Bande colorée à gauche au hover
+                    row.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 3, 1, 0, alt ? new Color(248, 253, 253) : Color.WHITE),
+                            BorderFactory.createEmptyBorder(9, 11, 9, 14)));
+
+                    // Infos texte (titre + artiste/genre)
+                    JPanel info = new JPanel();
+                    info.setOpaque(false);
+                    info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+                    JLabel lblT = new JLabel(m.getTitre());
+                    lblT.setFont(Styles.FONT_SMALL_BOLD);
+                    lblT.setForeground(Styles.TEXT);
+                    String artiste = m.getNomInterprete() != null ? m.getNomInterprete() : "\u2014";
+                    JLabel lblA = new JLabel(artiste + "  \u2022  " + m.getGenre());
+                    lblA.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.PLAIN, 11));
+                    lblA.setForeground(Styles.TEXT_MUTED);
+                    info.add(lblT);
+                    info.add(lblA);
+                    row.add(info, BorderLayout.CENTER);
+
+                    // Durée + bouton "+" à droite
+                    JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, Styles.PADDING_SM, 0));
+                    right.setOpaque(false);
+                    int sec = m.getDuree();
+                    JLabel lblDuree = new JLabel(sec / 60 + ":" + String.format("%02d", sec % 60));
+                    lblDuree.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.PLAIN, 11));
+                    lblDuree.setForeground(Styles.TEXT_MUTED);
+                    JButton btnSelect = new JButton("\u2713 Choisir");
+                    btnSelect.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.BOLD, 11));
+                    btnSelect.setForeground(Color.WHITE);
+                    btnSelect.setBackground(Styles.TEAL);
+                    btnSelect.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(Styles.TEAL_DARK, 1, true),
+                            BorderFactory.createEmptyBorder(4, 10, 4, 10)));
+                    btnSelect.setFocusPainted(false);
+                    btnSelect.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                    btnSelect.setVisible(false); // visible au hover uniquement
+                    right.add(lblDuree);
+                    right.add(btnSelect);
+                    row.add(right, BorderLayout.EAST);
+
+                    // Sélection : clic sur la ligne ou sur le bouton
+                    Color bgBase = alt ? new Color(248, 253, 253) : Color.WHITE;
+                    int idFinal = m.getId();
+                    Runnable select = () -> { chosen[0] = idFinal; dialog.dispose(); };
+                    btnSelect.addActionListener(e -> select.run());
+                    row.addMouseListener(new java.awt.event.MouseAdapter() {
+                        public void mouseClicked(java.awt.event.MouseEvent e) { select.run(); }
+                        public void mouseEntered(java.awt.event.MouseEvent e) {
+                            row.setBackground(Styles.TEAL_SURFACE);
+                            row.setBorder(BorderFactory.createCompoundBorder(
+                                    BorderFactory.createMatteBorder(0, 3, 1, 0, Styles.TEAL),
+                                    BorderFactory.createEmptyBorder(9, 11, 9, 14)));
+                            btnSelect.setVisible(true);
+                            row.revalidate(); row.repaint();
+                        }
+                        public void mouseExited(java.awt.event.MouseEvent e) {
+                            row.setBackground(bgBase);
+                            row.setBorder(BorderFactory.createCompoundBorder(
+                                    BorderFactory.createMatteBorder(0, 3, 1, 0, bgBase),
+                                    BorderFactory.createEmptyBorder(9, 11, 9, 14)));
+                            btnSelect.setVisible(false);
+                            row.revalidate(); row.repaint();
+                        }
+                    });
+                    listPanel.add(row);
+                }
+            }
+            listPanel.revalidate();
+            listPanel.repaint();
+        };
+
+        // Recherche live sur chaque frappe
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e)  { fillList.run(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e)  { fillList.run(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { fillList.run(); }
+        });
+
+        fillList.run(); // remplissage initial
+
+        JPanel center = new JPanel(new BorderLayout(0, 0));
+        center.setBackground(Styles.BG_MAIN);
+        center.add(scroll, BorderLayout.CENTER);
+        root.add(center, BorderLayout.CENTER);
+
+        // --- Pied : bouton Annuler ---
+        JButton btnCancel = Styles.secondaryButton("Annuler");
+        btnCancel.addActionListener(e -> dialog.dispose());
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, Styles.PADDING_SM));
+        south.setBackground(Styles.BG_MAIN);
+        south.add(btnCancel);
+        root.add(south, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        SwingUtilities.invokeLater(() -> searchField.requestFocusInWindow());
+        dialog.setVisible(true); // bloquant (modal=true)
+        return chosen[0];
     }
 
     /** Recharge et rafraîchit la liste des playlists depuis le modèle. */
@@ -4334,6 +4817,10 @@ public final class VueGraphique extends VueConsole {
     // ==================== ÉCOUTE ====================
 
     @Override public String demanderRechercheMusique() {
+        // Court-circuit : si on vient du picker playlist, le morceau est déjà choisi —
+        // on ne navigue PAS vers Écouter.
+        if (contexteAjoutPlaylist) return "__bypass__";
+
         // 1. Queue propre avant de commencer (élimine les "nav:xxx" résiduels
         //    posés par onSidebarClick pendant la transition vers cette carte).
         ecouteQueue.clear();
@@ -4373,6 +4860,7 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public void afficherResultatsEcoute(List<Morceau> resultats) {
+        if (contexteAjoutPlaylist) return; // le picker gère déjà l'affichage
         runOnEdt(() -> afficherResultatsEcouteDirect(resultats));
     }
 
@@ -4410,7 +4898,7 @@ public final class VueGraphique extends VueConsole {
                         + "  \u2022  " + m.getDureeFormatee());
                 row.add(lbl, BorderLayout.CENTER);
 
-                JButton btn = Styles.primaryButton("\u25B6 \u00c9couter");
+                JButton btn = Styles.primaryButton("Ecouter");
                 btn.setFont(Styles.FONT_SMALL);
                 btn.addActionListener(e -> {
                     try { ecouteQueue.put(m.getId()); } catch (InterruptedException ignored) {}
@@ -4437,45 +4925,73 @@ public final class VueGraphique extends VueConsole {
 
     /** Simule la lecture : barre de progression animée sur 3 secondes. */
     @Override public void afficherEcoute(Morceau m) {
-        SwingUtilities.invokeLater(() -> {
+        runOnEdt(() -> {
             ecouteTitreCourant.setText(m.getTitre());
             ecouteInterpreteLabel.setText(m.getNomInterprete() + "  \u2022  " + m.getDureeFormatee());
             ecouteProgressBar.setValue(0);
             ecoutePlayerPanel.setVisible(true);
+            // Reset pause standalone
+            ecouteEnPause = false;
+            ecouteBtnPause.setText("||");
+            if (playlistsLecteurPanel != null) {
+                playlistsLecteurTitre.setText(m.getTitre());
+                playlistsLecteurArtiste.setText(m.getNomInterprete() + "  \u2022  " + m.getDureeFormatee());
+                playlistsLecteurBar.setValue(0);
+                lecteurEnPause = false;
+                playlistsLecteurPause.setText("||");
+            }
         });
 
-        // Animation 3 s sur le thread contrôleur — met à jour la barre via invokeLater
         final int STEPS = 60;
         final int DELAY_MS = 50;
         for (int i = 1; i <= STEPS; i++) {
+            // Pause (standalone ou playlist)
+            while ((ecouteEnPause || lecteurEnPause) &&
+                    ecouteControleQueue.isEmpty() && lecteurPlaylistQueue.isEmpty()) {
+                try { Thread.sleep(100); } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt(); break;
+                }
+            }
+            // Interrompre si skip/stop pressé
+            if (!ecouteControleQueue.isEmpty() || !lecteurPlaylistQueue.isEmpty()) break;
+
             final int val = (i * 100) / STEPS;
-            SwingUtilities.invokeLater(() -> ecouteProgressBar.setValue(val));
+            SwingUtilities.invokeLater(() -> {
+                ecouteProgressBar.setValue(val);
+                if (playlistsLecteurBar != null) playlistsLecteurBar.setValue(val);
+            });
             try { Thread.sleep(DELAY_MS); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+                Thread.currentThread().interrupt(); break;
             }
         }
-        SwingUtilities.invokeLater(() -> ecouteProgressBar.setValue(100));
+        SwingUtilities.invokeLater(() -> {
+            ecouteProgressBar.setValue(100);
+            if (playlistsLecteurBar != null) playlistsLecteurBar.setValue(100);
+        });
     }
 
     @Override public int afficherMenuApresEcoute(int restantes) {
-        // En mode graphique on propose immédiatement une nouvelle recherche
-        // (la barre de progression s'est terminée) → retourner 1 = continuer
-        if (restantes == 0) return 2; // limite atteinte : arrêter
+        if (restantes == 0) return 2; // limite atteinte
         runOnEdt(() -> {
             if (restantes > 0) {
                 ecouteLimiteLabel.setText(restantes + " \u00e9coute(s) restante(s) cette session.");
             } else {
-                ecouteLimiteLabel.setText(""); // abonné : illimité
+                ecouteLimiteLabel.setText("");
             }
         });
-        // Détecter une navigation sidebar pendant la lecture (ex: clic "Catalogue", "Historique"...)
-        // On consomme uniquement les vraies navigations (pas le signal "ecoute" d'entrée)
-        String navPendantLecture = clientNavQueue.peek();
-        if (navPendantLecture != null && !navPendantLecture.equals("ecoute")) {
-            return 2; // arrêter l'écoute pour traiter la navigation
+        // Consommer un contrôle pressé pendant l'animation
+        String ctrl = ecouteControleQueue.poll();
+        if (ctrl != null) {
+            switch (ctrl) {
+                case "stop": return 2; // arrêter
+                case "next": return 1; // morceau suivant (continuer)
+                case "prev": return 1; // on retourne 1, ecouter() rebouclera
+            }
         }
-        return 1; // continuer l'écoute
+        // Navigation sidebar
+        String nav = clientNavQueue.peek();
+        if (nav != null && !nav.equals("ecoute")) return 2;
+        return 1; // continuer
     }
 
     @Override public int afficherMenuApresEchecRecherche() {
@@ -4494,13 +5010,29 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public int afficherControlesLecteur(boolean hasPrev, boolean hasNext) {
-        return 2; // toujours passer au suivant en mode graphique
+        // Mettre à jour l'état des boutons
+        runOnEdt(() -> {
+            if (playlistsLecteurPrev != null) playlistsLecteurPrev.setEnabled(hasPrev);
+            if (playlistsLecteurNext != null) playlistsLecteurNext.setEnabled(hasNext);
+        });
+        // Consommer l'action déjà posée pendant l'animation (interruption anticipée)
+        Integer action = lecteurPlaylistQueue.poll();
+        if (action != null) return action;
+        // Sinon passer automatiquement au suivant
+        return hasNext ? 2 : 3;
     }
 
     @Override public void afficherLecturePlaylist(String nom) {
-        runOnEdt(() -> {
+        runOnEdtAndWait(() -> {
             playlistsStatusLabel.setForeground(Styles.TEAL);
-            playlistsStatusLabel.setText("Lecture de \u00ab\u00a0" + nom + "\u00a0\u00bb en cours...");
+            playlistsStatusLabel.setText("▶  Lecture de «\u00a0" + nom + "\u00a0» en cours...");
+            lecteurPlaylistQueue.clear();
+            lecteurEnPause = false;
+            playlistsLecteurPause.setText("||");
+            playlistsLecteurPanel.setVisible(true);
+            playlistsLecteurPanel.revalidate();
+            playlistsLecteurPanel.repaint();
+            showCard("playlists");
         });
     }
 
@@ -4508,6 +5040,11 @@ public final class VueGraphique extends VueConsole {
         runOnEdt(() -> {
             playlistsStatusLabel.setForeground(Styles.TEXT_MUTED);
             playlistsStatusLabel.setText("Lecture de \u00ab\u00a0" + nom + "\u00a0\u00bb termin\u00e9e.");
+            lecteurEnPause = false;
+            if (playlistsLecteurPanel != null) {
+                playlistsLecteurBar.setValue(0);
+                playlistsLecteurPanel.setVisible(false);
+            }
         });
     }
 
@@ -4524,14 +5061,14 @@ public final class VueGraphique extends VueConsole {
                 vide.setBorder(new EmptyBorder(Styles.PADDING_MD, 0, 0, 0));
                 historiqueContentArea.add(vide);
             } else {
-                // En-têtes du tableau
-                JPanel header = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
+                // En-têtes : 5 colonnes (Titre, Interprète, Année, Date, Ma note)
+                JPanel header = new JPanel(new GridLayout(1, 5, Styles.PADDING_MD, 0));
                 header.setBackground(Styles.TEAL_SURFACE);
                 header.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 14));
                 header.setPreferredSize(new Dimension(0, 36));
                 header.setMinimumSize(new Dimension(0, 36));
                 header.setAlignmentX(Component.LEFT_ALIGNMENT);
-                for (String col : new String[]{"Titre", "Interpr\u00e8te", "Ann\u00e9e", "Date / heure"}) {
+                for (String col : new String[]{"Titre", "Interpr\u00e8te", "Ann\u00e9e", "Date / heure", "Ma note"}) {
                     JLabel h = new JLabel(col);
                     h.setFont(Styles.FONT_BODY_BOLD);
                     h.setForeground(Styles.TEAL_DARK);
@@ -4543,29 +5080,130 @@ public final class VueGraphique extends VueConsole {
                 for (int i = 0; i < historique.size(); i++) {
                     model.Historique h = historique.get(i);
                     final Color rowBg = (i % 2 == 0) ? Styles.BG_MAIN : Styles.BG_ALT;
-                    JPanel row = new JPanel(new GridLayout(1, 4, Styles.PADDING_MD, 0));
+
+                    JPanel row = new JPanel(new GridLayout(1, 5, Styles.PADDING_MD, 0));
                     row.setBackground(rowBg);
-                    row.addMouseListener(new java.awt.event.MouseAdapter() {
-                        @Override public void mouseEntered(java.awt.event.MouseEvent e) { row.setBackground(Styles.TEAL_SURFACE); }
-                        @Override public void mouseExited(java.awt.event.MouseEvent e)  { row.setBackground(rowBg); }
-                    });
                     row.setBorder(BorderFactory.createCompoundBorder(
                             BorderFactory.createMatteBorder(0, 0, 1, 0, Styles.BORDER),
-                            BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+                            BorderFactory.createEmptyBorder(8, 14, 8, 14)));
                     row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+                    // Colonnes texte
                     for (String val : new String[]{h.getTitre(), h.getInterprete(),
                             "" + h.getAnnee(), h.getDateHeure()}) {
                         JLabel cell = Styles.bodyLabel(val);
                         row.add(cell);
                     }
+
+                    // Colonne étoiles cliquables
+                    int idMorceau = h.getIdMorceau();
+                    int noteExistante = utilisateurId > 0
+                            ? model.Morceau.getNoteClient(idMorceau, utilisateurId) : 0;
+                    JPanel etoilesCell = buildEtoilesInline(idMorceau, noteExistante, row, rowBg);
+                    row.add(etoilesCell);
+
+                    // Hover sur la ligne entière
+                    row.addMouseListener(new java.awt.event.MouseAdapter() {
+                        @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                            row.setBackground(Styles.TEAL_SURFACE);
+                            etoilesCell.setBackground(Styles.TEAL_SURFACE);
+                        }
+                        @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                            row.setBackground(rowBg);
+                            etoilesCell.setBackground(rowBg);
+                        }
+                    });
+
                     historiqueContentArea.add(row);
                 }
             }
             historiqueContentArea.revalidate();
             historiqueContentArea.repaint();
         });
+    }
+
+    /**
+     * Construit une cellule de notation simple : un JTextField (1 char) + bouton "OK".
+     * Affiche la note actuelle si elle existe, sinon placeholder "1-5".
+     */
+    private JPanel buildEtoilesInline(int idMorceau, int noteInitiale, JPanel rowParent, Color rowBg) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        panel.setBackground(rowBg);
+        panel.setOpaque(true);
+
+        final int[] noteCourante = {noteInitiale};
+
+        // Affichage note actuelle
+        JLabel lblNote = new JLabel(noteInitiale > 0 ? noteInitiale + "/5" : "—");
+        lblNote.setFont(Styles.FONT_SMALL_BOLD);
+        lblNote.setForeground(noteInitiale > 0 ? new Color(202, 138, 4) : Styles.TEXT_MUTED);
+        lblNote.setPreferredSize(new Dimension(32, 22));
+
+        // Champ de saisie (1 caractère)
+        JTextField field = new JTextField(2);
+        field.setFont(Styles.FONT_SMALL);
+        field.setHorizontalAlignment(JTextField.CENTER);
+        field.setToolTipText("Entrez une note de 1 à 5");
+        field.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                BorderFactory.createEmptyBorder(2, 4, 2, 4)));
+
+        // Bouton OK
+        JButton btnOk = new JButton("OK");
+        btnOk.setFont(new Font(Styles.FONT_SMALL.getFamily(), Font.BOLD, 11));
+        btnOk.setForeground(Color.WHITE);
+        btnOk.setBackground(Styles.TEAL);
+        btnOk.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Styles.TEAL_DARK, 1, true),
+                BorderFactory.createEmptyBorder(3, 8, 3, 8)));
+        btnOk.setFocusPainted(false);
+        btnOk.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        // Action commune : valider la saisie
+        Runnable valider = () -> {
+            String txt = field.getText().trim();
+            try {
+                int note = Integer.parseInt(txt);
+                if (note < 1 || note > 5) {
+                    field.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(new Color(220, 38, 38), 1, true),
+                            BorderFactory.createEmptyBorder(2, 4, 2, 4)));
+                    field.setToolTipText("Note invalide : entrez un chiffre entre 1 et 5");
+                    return;
+                }
+                noteCourante[0] = note;
+                if (utilisateurId > 0)
+                    model.Morceau.noterMorceau(idMorceau, utilisateurId, note);
+                lblNote.setText(note + "/5");
+                lblNote.setForeground(new Color(202, 138, 4));
+                field.setText("");
+                field.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(Styles.TEAL, 1, true),
+                        BorderFactory.createEmptyBorder(2, 4, 2, 4)));
+                // Flash jaune pâle pour confirmer
+                Color flash = new Color(254, 249, 195);
+                rowParent.setBackground(flash);
+                panel.setBackground(flash);
+                new javax.swing.Timer(600, ev -> {
+                    rowParent.setBackground(rowBg);
+                    panel.setBackground(rowBg);
+                    ((javax.swing.Timer) ev.getSource()).stop();
+                }).start();
+            } catch (NumberFormatException ex) {
+                field.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(new Color(220, 38, 38), 1, true),
+                        BorderFactory.createEmptyBorder(2, 4, 2, 4)));
+            }
+        };
+
+        btnOk.addActionListener(e -> valider.run());
+        field.addActionListener(e -> valider.run()); // Entrée = valider
+
+        panel.add(lblNote);
+        panel.add(field);
+        panel.add(btnOk);
+        return panel;
     }
 
     // ==================== OVERRIDES DIVERS ====================
@@ -4601,23 +5239,115 @@ public final class VueGraphique extends VueConsole {
     }
 
     @Override public int proposerNotation(int noteActuelle) {
-        String msg = noteActuelle > 0
-                ? "Votre note actuelle : " + noteActuelle + "/5\n1. Modifier ma note\n2. Passer"
-                : "1. Noter ce morceau (1 à 5)\n2. Passer";
-        String[] options = {"Noter", "Passer"};
-        int rep = JOptionPane.showOptionDialog(fenetre, msg, "Notation",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[1]);
-        return (rep == 0) ? 1 : 2;
+        // Ouvre directement la modale étoiles — retourne 1 si une note a été choisie, 2 sinon.
+        final int[] result = {0};
+        try {
+            SwingUtilities.invokeAndWait(() -> result[0] = showNotationDialog(noteActuelle));
+        } catch (Exception e) { Thread.currentThread().interrupt(); }
+        return result[0] == 0 ? 2 : 1;
     }
 
     @Override public int demanderNote() {
-        return parseIntPrompt("Note", "Votre note (1 à 5) :", 0);
+        // La note a déjà été choisie dans showNotationDialog — on la retourne.
+        return noteCourante;
+    }
+
+    /** Note choisie dans la modale étoiles, lue par demanderNote(). */
+    private volatile int noteCourante = 0;
+
+    /**
+     * Affiche une modale de notation avec 5 étoiles cliquables.
+     * Retourne la note choisie (1-5), ou 0 si annulé/fermé.
+     */
+    private int showNotationDialog(int noteActuelle) {
+        JDialog dialog = new JDialog(fenetre, "Noter ce morceau", true);
+        dialog.setSize(360, 220);
+        dialog.setLocationRelativeTo(fenetre);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+
+        final int[] chosen = {0};
+
+        JPanel root = new JPanel(new BorderLayout(0, Styles.PADDING_MD));
+        root.setBackground(Styles.BG_MAIN);
+        root.setBorder(new EmptyBorder(Styles.PADDING_LG, Styles.PADDING_LG,
+                Styles.PADDING_MD, Styles.PADDING_LG));
+
+        JLabel lblTitre = Styles.subtitleLabel("Votre note");
+        lblTitre.setHorizontalAlignment(SwingConstants.CENTER);
+        root.add(lblTitre, BorderLayout.NORTH);
+
+        JPanel center = new JPanel();
+        center.setOpaque(false);
+        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+
+        if (noteActuelle > 0) {
+            JLabel lblActuelle = Styles.mutedLabel("Note actuelle : " + noteActuelle + "/5 — cliquez pour modifier");
+            lblActuelle.setAlignmentX(Component.CENTER_ALIGNMENT);
+            center.add(lblActuelle);
+            center.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        }
+
+        // 5 étoiles cliquables avec hover
+        JPanel etoilesPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 0));
+        etoilesPanel.setOpaque(false);
+        JButton[] etoiles = new JButton[5];
+        final int[] survol = {noteActuelle > 0 ? noteActuelle : 0};
+
+        for (int i = 1; i <= 5; i++) {
+            final int val = i;
+            JButton btn = new JButton(i <= survol[0] ? "★" : "☆");
+            btn.setFont(new Font(Styles.FONT_BODY.getFamily(), Font.PLAIN, 30));
+            btn.setForeground(new Color(202, 138, 4));
+            btn.setBackground(Styles.BG_MAIN);
+            btn.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
+            btn.setFocusPainted(false);
+            btn.setContentAreaFilled(false);
+            btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            etoiles[i - 1] = btn;
+
+            btn.addMouseListener(new java.awt.event.MouseAdapter() {
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    for (int j = 0; j < 5; j++)
+                        etoiles[j].setText(j < val ? "★" : "☆");
+                }
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    for (int j = 0; j < 5; j++)
+                        etoiles[j].setText(j < survol[0] ? "★" : "☆");
+                }
+            });
+            btn.addActionListener(e -> {
+                survol[0] = val;
+                chosen[0] = val;
+                for (int j = 0; j < 5; j++)
+                    etoiles[j].setText(j < val ? "★" : "☆");
+                dialog.dispose();
+            });
+            etoilesPanel.add(btn);
+        }
+        center.add(etoilesPanel);
+        root.add(center, BorderLayout.CENTER);
+
+        JButton btnPasser = Styles.secondaryButton("Passer");
+        btnPasser.addActionListener(e -> dialog.dispose());
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        south.setBackground(Styles.BG_MAIN);
+        south.add(btnPasser);
+        root.add(south, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.setVisible(true);
+
+        noteCourante = chosen[0];
+        return chosen[0];
     }
 
     @Override public void afficherNoteEnregistree(int note) {
         StringBuilder etoiles = new StringBuilder();
-        for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "\u2605" : "\u2606");
-        showInfo("Note enregistr\u00e9e : " + etoiles + " (" + note + "/5)");
+        for (int i = 1; i <= 5; i++) etoiles.append(i <= note ? "★" : "☆");
+        runOnEdt(() -> {
+            playlistsStatusLabel.setForeground(new Color(202, 138, 4));
+            playlistsStatusLabel.setText(etoiles + "  Note " + note + "/5 enregistree");
+        });
     }
 
 

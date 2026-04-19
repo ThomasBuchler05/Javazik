@@ -111,6 +111,33 @@ public class Historique {
         return count;
     }
 
+    /**
+     * Supprime toutes les entrées d'historique d'un client donné.
+     * Réécrit le fichier en conservant les lignes des autres clients.
+     */
+    public static void supprimerHistoriqueClient(int idClient) {
+        File fichier = new File(FICHIER_HISTORIQUE);
+        if (!fichier.exists()) return;
+
+        List<String> lignesAutres = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(fichier))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] parts = ligne.split(";");
+                if (parts.length < 1) continue;
+                try {
+                    if (Integer.parseInt(parts[0]) != idClient)
+                        lignesAutres.add(ligne);
+                } catch (NumberFormatException ignored) {}
+            }
+        } catch (IOException e) { e.printStackTrace(); return; }
+
+        try (FileWriter fw = new FileWriter(fichier, false)) {
+            for (String l : lignesAutres) fw.write(l + "\n");
+        } catch (IOException e) { e.printStackTrace(); }
+    }
+
     @Override
     public String toString() {
         return "[" + dateHeure + "] " + titre + " - " + interprete + " (" + annee + ")";

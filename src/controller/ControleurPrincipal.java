@@ -597,6 +597,10 @@ public class ControleurPrincipal {
     // ==================== MENU PLAYLIST ====================
 
     private void menuPlaylist() {
+        // Charger et afficher les playlists dès l'ouverture de l'écran
+        List<Playlist> playlistsInit = Playlist.getPlaylistsClient(utilisateur.getID());
+        vue.afficherListePlaylists(playlistsInit);
+
         int choix;
         do {
             choix = vue.afficherMenuPlaylist();
@@ -638,11 +642,18 @@ public class ControleurPrincipal {
         if (cible == null) { vue.afficherPlaylistIntrouvable(); return; }
 
         String recherche = vue.demanderRechercheMusique();
-        List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
-        vue.afficherResultatsEcoute(resultats);
-        if (resultats.isEmpty()) return;
 
-        int idMorceau = vue.demanderIdMorceau();
+        int idMorceau;
+        if ("__bypass__".equals(recherche)) {
+            // Le picker graphique a déjà choisi le morceau — on le récupère directement
+            idMorceau = vue.demanderIdMorceau();
+        } else {
+            List<Morceau> resultats = Morceau.rechercherGlobal(recherche);
+            vue.afficherResultatsEcoute(resultats);
+            if (resultats.isEmpty()) return;
+            idMorceau = vue.demanderIdMorceau();
+        }
+
         boolean ok = Playlist.ajouterMorceau(idPlaylist, idMorceau);
         if (ok) {
             Morceau m = Morceau.rechercherParId(idMorceau);
@@ -701,16 +712,16 @@ public class ControleurPrincipal {
 
         vue.afficherLecturePlaylist(cible.getNom());
         int index = 0;
-        while (index < morceaux.size()) {
+        while (index >= 0 && index < morceaux.size()) {
             Morceau m = morceaux.get(index);
             vue.afficherPochette(index + 1, morceaux.size(), m);
             vue.afficherEcoute(m);
             Historique.enregistrerEcoute(utilisateur.getID(), m);
             int action = vue.afficherControlesLecteur(index > 0, index < morceaux.size() - 1);
             switch (action) {
-                case 1: index--; break;
-                case 2: index++; break;
-                case 3: vue.afficherFinPlaylist(cible.getNom()); return;
+                case 1: index = Math.max(0, index - 1); break;  // prev — jamais < 0
+                case 2: index++; break;                          // next
+                case 3: vue.afficherFinPlaylist(cible.getNom()); return; // stop
                 default: index++;
             }
         }

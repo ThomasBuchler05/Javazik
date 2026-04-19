@@ -345,6 +345,43 @@ public class Morceau {
     }
 
     /**
+     * Retourne tous les morceaux ayant au moins une note,
+     * triés par note moyenne décroissante.
+     * Chaque entrée : int[0]=idMorceau, double[1]=moyenne, int[2]=nbVotes
+     */
+    public static List<int[]> getMorceauxNotes() {
+        // Lire toutes les notes : idMorceau → {total, count}
+        java.util.Map<Integer, int[]> map = new java.util.LinkedHashMap<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(FICHIER_NOTES))) {
+            String ligne;
+            while ((ligne = br.readLine()) != null) {
+                if (ligne.trim().isEmpty()) continue;
+                String[] p = ligne.split(";");
+                if (p.length < 3) continue;
+                int idM = Integer.parseInt(p[0]);
+                int note = Integer.parseInt(p[2]);
+                map.computeIfAbsent(idM, k -> new int[]{0, 0});
+                map.get(idM)[0] += note;
+                map.get(idM)[1]++;
+            }
+        } catch (FileNotFoundException e) {
+            // pas de notes
+        } catch (IOException e) { e.printStackTrace(); }
+
+        // Construire la liste [idMorceau, moyenneX10 (pour tri), nbVotes]
+        List<int[]> result = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<Integer, int[]> entry : map.entrySet()) {
+            int id = entry.getKey();
+            int total = entry.getValue()[0];
+            int count = entry.getValue()[1];
+            // On stocke moyenne * 10 comme int pour le tri, nbVotes
+            result.add(new int[]{id, total * 10 / count, count});
+        }
+        result.sort((a, b) -> b[1] - a[1]); // tri décroissant par moyenne
+        return result;
+    }
+
+    /**
      * Retourne la note donnée par un client pour ce morceau, ou 0 si pas encore noté.
      */
     public static int getNoteClient(int idMorceau, int idClient) {
