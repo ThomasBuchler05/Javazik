@@ -32,7 +32,7 @@ public class Utilisateur {
 
         try {
             FileWriter fw = new FileWriter("monfichier.txt", true);
-            fw.write(ID + ";" + NOM + ";" + PRENOM + ";" + MDP + ";" + EMAIL + "\n");
+            fw.write(ID + ";" + NOM + ";" + PRENOM + ";" + MDP + ";" + EMAIL + ";1\n");
             fw.close();
         } catch (IOException e) {
             e.printStackTrace();
@@ -53,13 +53,15 @@ public class Utilisateur {
             while ((ligne = br.readLine()) != null) {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
-                if (parts.length < 5) continue;
+                if (parts.length < 6) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
                 String mdp = parts[3].trim();
                 String email = parts[4].trim();
-                if (mailSaisi.equals(email)) {
+                String role = parts[5].trim();
+                // Seuls les comptes avec role=1 sont des clients
+                if (mailSaisi.equals(email) && role.equals("1")) {
                     this.ID = Integer.parseInt(id);
                     this.NOM = nom;
                     this.PRENOM = prenom;
@@ -86,13 +88,15 @@ public class Utilisateur {
             while ((ligne = br.readLine()) != null) {
                 if (ligne.trim().isEmpty()) continue;
                 String[] parts = ligne.split(";");
-                if (parts.length < 5) continue;
+                if (parts.length < 6) continue;
                 String id = parts[0];
                 String nom = parts[1];
                 String prenom = parts[2];
                 String mdp = parts[3].trim();
                 String email = parts[4].trim();
-                if (mailSaisi.equals(email)) {
+                String role = parts[5].trim();
+                // Seuls les comptes avec role=0 sont des administrateurs
+                if (mailSaisi.equals(email) && role.equals("0")) {
                     this.ID = Integer.parseInt(id);
                     this.NOM = nom;
                     this.PRENOM = prenom;

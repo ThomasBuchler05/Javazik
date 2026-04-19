@@ -625,6 +625,58 @@ public final class VueGraphique extends VueConsole {
     private JLabel labelErreurCourant = null;
 
     /**
+     * Mini-bannière hero réutilisable affichée en haut des pages connexion et inscription.
+     * Reprend le dégradé teal + notes animées + logo de la page d'accueil.
+     */
+    private JPanel buildMiniHero() {
+        JPanel hero = new JPanel() {
+            private float noteOffset = 0f;
+            {
+                javax.swing.Timer anim = new javax.swing.Timer(60, e -> {
+                    noteOffset = (noteOffset + 0.6f) % 40f;
+                    repaint();
+                });
+                anim.start();
+            }
+            @Override protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                GradientPaint gp = new GradientPaint(0, 0, Styles.TEAL, getWidth(), getHeight(), Styles.TEAL_DARK);
+                g2.setPaint(gp);
+                g2.fillRect(0, 0, getWidth(), getHeight());
+                // Notes musicales flottantes semi-transparentes
+                g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 50));
+                g2.setColor(new Color(255, 255, 255, 22));
+                g2.drawString("\u266B", getWidth() - 120, (int)(70 + noteOffset));
+                g2.drawString("\u266A", getWidth() - 220, (int)(40 + noteOffset * 0.7f));
+                g2.drawString("\u2669", getWidth() - 40,  (int)(90 + noteOffset * 1.3f));
+                g2.dispose();
+            }
+        };
+        hero.setLayout(new BoxLayout(hero, BoxLayout.Y_AXIS));
+        hero.setBorder(new EmptyBorder(Styles.PADDING_LG * 2, Styles.PADDING_LG * 3,
+                Styles.PADDING_LG * 2, Styles.PADDING_LG * 3));
+        hero.setPreferredSize(new Dimension(0, 120));
+
+        JLabel logoLabel = new JLabel("JAVAZIK  \u266A");
+        logoLabel.setFont(Styles.FONT_LOGO.deriveFont(Font.BOLD, 30f));
+        logoLabel.setForeground(Color.WHITE);
+        logoLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel tagline = new JLabel("Votre catalogue musical, vos playlists, votre historique.");
+        tagline.setFont(Styles.FONT_BODY.deriveFont(13f));
+        tagline.setForeground(new Color(255, 255, 255, 200));
+        tagline.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        hero.add(logoLabel);
+        hero.add(Box.createVerticalStrut(Styles.PADDING_SM));
+        hero.add(tagline);
+
+        return hero;
+    }
+
+    /**
      * Construit une carte formulaire de connexion réutilisable (admin ou client).
      * Elle contient un champ email, un champ mot de passe et un bouton Valider.
      *
@@ -661,8 +713,14 @@ public final class VueGraphique extends VueConsole {
     private JPanel buildConnexionCard(String titreStr, String sousTitreStr, String cardKey) {
         int idx = cardKey.equals("connexionAdmin") ? 0 : 1;
 
-        JPanel outer = new JPanel(new GridBagLayout());
+        JPanel outer = new JPanel(new BorderLayout());
         outer.setBackground(Styles.BG_MAIN);
+
+        // — Mini-bannière hero avec logo animé —
+        outer.add(buildMiniHero(), BorderLayout.NORTH);
+
+        JPanel centerWrapper = new JPanel(new GridBagLayout());
+        centerWrapper.setBackground(Styles.BG_MAIN);
 
         JPanel form = new JPanel();
         form.setBackground(Styles.BG_MAIN);
@@ -748,7 +806,8 @@ public final class VueGraphique extends VueConsole {
         fieldMdp.addActionListener(e -> submitAction.run());
         btnValider.addActionListener(e -> submitAction.run());
 
-        outer.add(form);
+        centerWrapper.add(form);
+        outer.add(centerWrapper, BorderLayout.CENTER);
         return outer;
     }
 
@@ -761,8 +820,14 @@ public final class VueGraphique extends VueConsole {
     private final JLabel         inscErreur = new JLabel(" ");
 
     private JPanel buildInscriptionCard() {
-        JPanel outer = new JPanel(new GridBagLayout());
+        JPanel outer = new JPanel(new BorderLayout());
         outer.setBackground(Styles.BG_MAIN);
+
+        // — Mini-bannière hero avec logo animé —
+        outer.add(buildMiniHero(), BorderLayout.NORTH);
+
+        JPanel centerWrapper = new JPanel(new GridBagLayout());
+        centerWrapper.setBackground(Styles.BG_MAIN);
 
         JPanel form = new JPanel();
         form.setBackground(Styles.BG_MAIN);
@@ -818,7 +883,8 @@ public final class VueGraphique extends VueConsole {
         inscMdp.addActionListener(e -> submitInscription.run());
         btnValider.addActionListener(e -> submitInscription.run());
 
-        outer.add(form);
+        centerWrapper.add(form);
+        outer.add(centerWrapper, BorderLayout.CENTER);
         return outer;
     }
 
