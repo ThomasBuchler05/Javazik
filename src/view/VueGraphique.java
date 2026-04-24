@@ -3921,7 +3921,7 @@ public final class VueGraphique extends VueConsole {
                     lblMoyenne.setFont(Styles.FONT_SMALL_BOLD);
                     lblMoyenne.setForeground(moyenne >= 4 ? new Color(22, 163, 74)
                             : moyenne >= 3 ? new Color(202, 138, 4)
-                            : new Color(220, 38, 38));
+                              : new Color(220, 38, 38));
                     noteCell.add(lblMoyenne);
 
                     JLabel lblVotes = Styles.bodyLabel(nbVotes + " vote" + (nbVotes > 1 ? "s" : ""));
@@ -4951,6 +4951,11 @@ public final class VueGraphique extends VueConsole {
 
     /** Simule la lecture : barre de progression animée sur 3 secondes. */
     @Override public void afficherEcoute(Morceau m) {
+        // Vider les contrôles résiduels de la lecture précédente (next/prev/stop)
+        // pour éviter que la boucle de simulation ne s'arrête immédiatement.
+        ecouteControleQueue.clear();
+        lecteurPlaylistQueue.clear();
+
         runOnEdt(() -> {
             ecouteTitreCourant.setText(m.getTitre());
             ecouteInterpreteLabel.setText(m.getNomInterprete() + "  \u2022  " + m.getDureeFormatee());
